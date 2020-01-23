@@ -96,8 +96,8 @@ class Parameter(Variable):
                 raise ValueError(('resolution not consistent with lower and '
                                   'upper bound'))
 
-        if lower_bound >= upper_bound:
-            raise ValueError('upper bound should be larger than lower bound')
+        if lower_bound > upper_bound:
+            raise ValueError('upper bound should be equal to or larger than lower bound')
 
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
@@ -398,14 +398,14 @@ class BooleanParameter(IntegerParameter):
 
 class Policy(NamedDict):
     '''Helper class representing a policy
-    
+
     Attributes
     ----------
     name : str, int, or float
     id : int
-    
+
     all keyword arguments are wrapped into a dict.
-    
+
     '''
     # TODO:: separate id and name
     # if name is not provided fall back on id
@@ -439,16 +439,16 @@ class Policy(NamedDict):
 
 class Scenario(NamedDict):
     '''Helper class representing a scenario
-    
+
     Attributes
     ----------
     name : str, int, or float
     id : int
-    
+
     all keyword arguments are wrapped into a dict.
-    
+
     '''
-    
+
     # we need to start from 1 so scenario id is known
     id_counter = Counter(1)
 
