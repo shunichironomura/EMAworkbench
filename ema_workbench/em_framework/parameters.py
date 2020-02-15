@@ -85,7 +85,7 @@ class Parameter(Variable):
     UNIFORM = 'uniform'
 
     def __init__(self, name, lower_bound, upper_bound, resolution=None,
-                 default=None, variable_name=None, pff=False):
+                 default=None, variable_name=None, pff=False, **kwargs):
         super(Parameter, self).__init__(name)
 
         if resolution is None:
@@ -105,6 +105,11 @@ class Parameter(Variable):
         self.default = default
         self.variable_name = variable_name
         self.pff = pff
+
+        self.__dict = dict()
+        for k, v in kwargs.items():
+            self.__dict[k] = v
+
 
     def __eq__(self, other):
         comparison = [all(hasattr(self, key) == hasattr(other, key) and
@@ -134,6 +139,14 @@ class Parameter(Variable):
 
         return start
 
+    def __getitem__(self, key):
+        return self.__dict[key]
+
+    def __setitem__(self, key, value):
+        self.__dict[key] = value
+
+    def __delitem__(self, key):
+        del self.__dict[key]
 
 class RealParameter(Parameter):
     ''' real valued model input parameter
@@ -157,7 +170,7 @@ class RealParameter(Parameter):
     '''
 
     def __init__(self, name, lower_bound, upper_bound, resolution=None,
-                 default=None, variable_name=None, pff=False):
+                 default=None, variable_name=None, pff=False, **kwargs):
         super(
             RealParameter,
             self).__init__(
@@ -167,7 +180,8 @@ class RealParameter(Parameter):
             resolution=resolution,
             default=default,
             variable_name=variable_name,
-            pff=pff)
+            pff=pff,
+            **kwargs)
 
         self.dist = Parameter.UNIFORM
 
@@ -200,7 +214,7 @@ class IntegerParameter(Parameter):
     '''
 
     def __init__(self, name, lower_bound, upper_bound, resolution=None,
-                 default=None, variable_name=None, pff=False):
+                 default=None, variable_name=None, pff=False, **kwargs):
         super(
             IntegerParameter,
             self).__init__(
@@ -210,7 +224,8 @@ class IntegerParameter(Parameter):
             resolution=resolution,
             default=default,
             variable_name=variable_name,
-            pff=pff)
+            pff=pff,
+            **kwargs)
 
         lb_int = isinstance(lower_bound, numbers.Integral)
         up_int = isinstance(upper_bound, numbers.Integral)
@@ -254,7 +269,7 @@ class CategoricalParameter(IntegerParameter):
         self._categories.extend(values)
 
     def __init__(self, name, categories, default=None, variable_name=None,
-                 pff=False, multivalue=False):
+                 pff=False, multivalue=False, **kwargs):
         lower_bound = 0
         upper_bound = len(categories) - 1
 
@@ -270,7 +285,8 @@ class CategoricalParameter(IntegerParameter):
             resolution=None,
             default=default,
             variable_name=variable_name,
-            pff=pff)
+            pff=pff,
+            **kwargs)
         cats = [create_category(cat) for cat in categories]
 
         self._categories = NamedObjectMap(Category)
@@ -350,7 +366,7 @@ class BinaryParameter(CategoricalParameter):
     name : str
     '''
 
-    def __init__(self, name, default=None, ):
+    def __init__(self, name, default=None, **kwargs):
         super(
             BinaryParameter,
             self).__init__(
@@ -358,7 +374,8 @@ class BinaryParameter(CategoricalParameter):
             categories=[
                 False,
                 True],
-            default=default)
+            default=default,
+            **kwargs)
 
 
 class BooleanParameter(IntegerParameter):
@@ -375,10 +392,10 @@ class BooleanParameter(IntegerParameter):
     '''
 
     def __init__(self, name, default=None, variable_name=None,
-                 pff=False):
+                 pff=False, **kwargs):
         super(BooleanParameter, self).__init__(
             name, 0, 1, resolution=None, default=default,
-            variable_name=variable_name, pff=pff)
+            variable_name=variable_name, pff=pff, **kwargs)
 
         self.categories = [False, True]
         self.resolution = [0, 1]
