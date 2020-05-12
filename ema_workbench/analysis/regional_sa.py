@@ -247,8 +247,11 @@ def plot_cdfs(x, y, ccdf=False):
     uncs = x.columns.tolist()
     cp = sns.color_palette()
 
-    n_col = 4
-    n_row = math.ceil(len(uncs) / n_col)
+    n_uncs = len(uncs)
+    from math import sqrt
+    n_col = int(round(4. / 3 * sqrt(n_uncs))) # New implementation.
+    # n_col = 4
+    n_row = math.ceil(n_uncs / n_col)
     size = 3
     aspect = 1
     figsize = n_col * size * aspect, n_row * size
