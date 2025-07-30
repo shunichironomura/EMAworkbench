@@ -91,7 +91,13 @@ def plot_discrete_cdf(ax, unc, x, y, xticklabels_on, ccdf):
                 cum_freq_un = (len(freqs) - j - 1) / n_cat
 
             ax.plot(
-                x_plot, [cum_freq_un] * 2, lw=1, c="darkgrey", zorder=1, label="x==y", marker="o"
+                x_plot,
+                [cum_freq_un] * 2,
+                lw=1,
+                c="darkgrey",
+                zorder=1,
+                label="x==y",
+                marker="o",
             )
 
     ax.set_xticklabels([])
@@ -232,8 +238,11 @@ def plot_cdfs(x, y, ccdf=False):
         pass
 
     for entry in ["model", "policy"]:
-        if x.loc[:, entry].unique().shape != (1,):
-            continue
+        try:
+            if x.loc[:, entry].unique().shape != (1,):
+                continue
+        except KeyError:
+            pass
         try:
             x = x.drop(entry, axis=1)
         except KeyError:
