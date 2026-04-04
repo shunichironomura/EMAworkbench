@@ -1,16 +1,16 @@
-"""
-Created on 3 Jan. 2011
+"""Basic example of how to connect a Vensim model to the ema_workbench."""
 
-This file illustrated the use the EMA classes for a contrived vensim
-example
+# Created on 3 Jan. 2011
+#
+# This file illustrated the use the EMA classes for a contrived vensim
+# example
 
-
-.. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
-                chamarat <c.hamarat (at) tudelft (dot) nl>
-"""
-
-from ema_workbench import TimeSeriesOutcome, perform_experiments, RealParameter, ema_logging
-
+from ema_workbench import (
+    RealParameter,
+    TimeSeriesOutcome,
+    ema_logging,
+    perform_experiments,
+)
 from ema_workbench.connectors.vensim import VensimModel
 
 if __name__ == "__main__":
@@ -19,9 +19,12 @@ if __name__ == "__main__":
 
     # instantiate a model
     wd = "./models/vensim example"
-    vensimModel = VensimModel("simpleModel", wd=wd, model_file="model.vpm")
-    vensimModel.uncertainties = [RealParameter("x11", 0, 2.5), RealParameter("x12", -2.5, 2.5)]
+    vensim_model = VensimModel("simple_model", wd=wd, model_file="model.vpm")
+    vensim_model.uncertainties = [
+        RealParameter("x11", 0, 2.5),
+        RealParameter("x12", -2.5, 2.5),
+    ]
 
-    vensimModel.outcomes = [TimeSeriesOutcome("a")]
+    vensim_model.outcomes = [TimeSeriesOutcome("a")]
 
-    results = perform_experiments(vensimModel, 1000)
+    results = perform_experiments(vensim_model, 1000)

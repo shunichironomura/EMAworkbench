@@ -1,16 +1,18 @@
-"""connector for Simio, dependent on python for .net (pythonnet). The
-connector assumes Simio is installed in C:/Program Files (x86)/Simio
+"""Connector for Simio, dependent on python for .net (pythonnet).
+
+The connector assumes Simio is installed in C:/Program Files (x86)/Simio
 
 """
 
 import os
 import sys
-import numpy as np
 
 import clr  # @UnresolvedImport
+import numpy as np
 
-from ema_workbench.em_framework import FileModel, SingleReplication
-from ema_workbench.util import CaseError, EMAError
+from ema_workbench.em_framework import FileModel
+from ema_workbench.em_framework.model import SingleReplication
+from ema_workbench.util import EMAError, ExperimentError
 from ema_workbench.util.ema_logging import get_module_logger, method_logger
 
 # TODO:: do some auto discovery here analogue to netlogo?
@@ -22,7 +24,7 @@ else:
 
 clr.AddReference("SimioDLL")
 clr.AddReference("SimioAPI")
-import SimioAPI  # @UnresolvedImport
+import SimioAPI  # noqa: E402 @UnresolvedImport
 
 # Created on 27 June 2019
 #
@@ -32,9 +34,9 @@ _logger = get_module_logger(__name__)
 
 
 class SimioModel(FileModel, SingleReplication):
-    """Connector for Simio models
+    """Connector for Simio models.
 
-     Parameters
+    Parameters
     ----------
     name : str
            name of the modelInterface. The name should contain only
@@ -64,8 +66,15 @@ class SimioModel(FileModel, SingleReplication):
     """
 
     @method_logger(__name__)
-    def __init__(self, name, wd=None, model_file=None, main_model=None, n_replications=10):
-        """interface to the model
+    def __init__(
+        self,
+        name,
+        wd: str | None = None,
+        model_file: str | None = None,
+        main_model: str | None = None,
+        n_replications: int = 10,
+    ):
+        """Interface to the model.
 
         Parameters
         ----------
@@ -88,7 +97,7 @@ class SimioModel(FileModel, SingleReplication):
 
         """
         super().__init__(name, wd=wd, model_file=model_file)
-        assert main_model != None
+        assert main_model is not None
         self.main_model_name = main_model
         self.output = {}
         self.n_replications = n_replications
@@ -101,6 +110,7 @@ class SimioModel(FileModel, SingleReplication):
 
     @method_logger(__name__)
     def model_init(self, policy):
+        """Initialize the model."""
         super().model_init(policy)
         _logger.debug("initializing model")
 
@@ -125,7 +135,9 @@ class SimioModel(FileModel, SingleReplication):
 
         # set up new EMA specific experiment on model
         _logger.debug("setting up EMA experiment")
-        self.experiment = SimioAPI.IExperiment(model.Experiments.Create("ema experiment"))
+        self.experiment = SimioAPI.IExperiment(
+            model.Experiments.Create("ema experiment")
+        )
         SimioAPI.IExperimentResponses(self.experiment.Responses).Clear()
 
         # use all available responses as template for experiment responses
@@ -133,13 +145,14 @@ class SimioModel(FileModel, SingleReplication):
 
         for outcome in self.outcomes:
             for name in outcome.variable_name:
-                name = outcome.name
                 try:
                     value = responses[name]
-                except KeyError:
-                    raise EMAError(f"response with name '{name}' not found")
+                except KeyError as e:
+                    raise EMAError(f"response with name '{name}' not found") from e
 
-                response = SimioAPI.IExperimentResponse(self.experiment.Responses.Create(name))
+                response = SimioAPI.IExperimentResponse(
+                    self.experiment.Responses.Create(name)
+                )
                 response.set_Expression(value.Expression)
                 response.set_Objective(value.Objective)
 
@@ -160,6 +173,7 @@ class SimioModel(FileModel, SingleReplication):
 
     @method_logger(__name__)
     def run_experiment(self, experiment):
+        """Run the experiment."""
         self.case = experiment
         _logger.debug("Setup SIMIO scenario")
 
@@ -170,18 +184,18 @@ class SimioModel(FileModel, SingleReplication):
         for key, value in experiment.items():
             try:
                 control = self.control_map[key]
-            except KeyError:
+            except KeyError as e:
                 raise EMAError(
                     """uncertainty not specified as '
                                   'control in simio model"""
-                )
+                ) from e
             else:
                 ret = scenario.SetControlValue(control, str(value))
 
                 if ret:
                     _logger.debug(f"{key} set successfully")
                 else:
-                    raise CaseError(f"failed to set {key}", self.case)
+                    raise ExperimentError(f"failed to set {key}", self.case)
 
         _logger.debug("SIMIO scenario setup completed")
 
@@ -195,9 +209,9 @@ class SimioModel(FileModel, SingleReplication):
 
     @method_logger(__name__)
     def reset_model(self):
-        """
-        Method for resetting the model to its initial state. The default
-        implementation only sets the outputs to an empty dict.
+        """Method for resetting the model to its initial state.
+
+        The default implementation only sets the outputs to an empty dict.
 
         """
         super().reset_model()
@@ -207,8 +221,7 @@ class SimioModel(FileModel, SingleReplication):
 
     @method_logger(__name__)
     def scenario_ended(self, sender, scenario_ended_event):
-        """scenario ended event handler"""
-
+        """Scenario ended event handler."""
         #         ema_logging.debug('scenario ended called!')
 
         # This event handler will be called when all replications for a
@@ -251,7 +264,7 @@ class SimioModel(FileModel, SingleReplication):
                 if success:
                     replication_scores.append(value)
                 else:
-                    error = CaseError("error in simio replication", self.case)
+                    error = ExperimentError("error in simio replication", self.case)
                     _logger.exception(str(error))
                     raise error
 
@@ -259,8 +272,7 @@ class SimioModel(FileModel, SingleReplication):
 
     @method_logger(__name__)
     def run_completed(self, sender, run_completed_event):
-        """run completed event handler"""
-
+        """Run completed event handler."""
         _logger.debug("run completed")
 
         # This event handler is the last one to be called during the run.
@@ -272,9 +284,9 @@ class SimioModel(FileModel, SingleReplication):
 
 
 def get_responses(model):
-    """Helper function for getting responses
+    """Helper function for getting responses.
 
-    this function gathers all responses defined on all experiments available
+    This function gathers all responses defined on all experiments available
     on the model.
 
     Parameters
@@ -282,7 +294,6 @@ def get_responses(model):
     model : SimioAPI.IModel instance
 
     """
-
     response_map = {}
 
     experiments = SimioAPI.IExperiments(model.Experiments)

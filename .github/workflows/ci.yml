@@ -11,6 +11,10 @@ on:
   # schedule:
   #   - cron: '0 6 * * 1'
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -22,25 +26,29 @@ jobs:
         name: [""]
         include:
           - os: ubuntu-latest
-            python-version: "3.11"
-            test-mpi: true
-          - os: ubuntu-latest
-            python-version: "3.10"
-          - os: ubuntu-latest
             python-version: "3.12"
             pip-pre: "--pre"  # Installs pre-release versions of pip dependencies
             name: "Pre-release dependencies"
+            test-mpi: False
+          - os: ubuntu-latest
+            python-version: "3.12"
+            test-mpi: true
+            name: "include MPI testing"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - run: pip install uv
     - name: Install dependencies
       run: |
-        uv pip install .[dev,cov] --system ${{ matrix.pip-pre }}
+        uv pip install .[dev,cov,graph] --system ${{ matrix.pip-pre }}
     - name: Install MPI and mpi4py
       if: matrix.test-mpi == true
       run: |
@@ -49,26 +57,21 @@ jobs:
         uv pip install mpi4py --system
     - name: Test with Pytest
       timeout-minutes: 15
-      run:
-        pytest --ignore=./test/test_connectors -v --cov=ema_workbench/em_framework --cov=ema_workbench/util --cov=ema_workbench/analysis
+      run: |
+        coverage run -m pytest --ignore=./test/test_connectors -v
+        coverage xml
     - name: Coveralls
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-      env:
-         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: coveralls --service=github
-
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' &&  matrix.test-mpi == true
+      uses: coverallsapp/github-action@v2
+      with:
+        format: cobertura
+        file: coverage.xml
 
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
       with:
         python-version: "3.12"
-    - run: pip install flake8
-    - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - uses: astral-sh/ruff-action@v3

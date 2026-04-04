@@ -1,7 +1,6 @@
-"""
+"""Helper functions and classes for logging in the workbench.
 
-This module contains code for logging EMA processes. It is modeled on the
-default `logging approach that comes with
+It is modeled on the default `logging approach that comes with
 Python <https://docs.python.org/library/logging.html>`_.
 This logging system will also work in case of multiprocessing.
 
@@ -18,22 +17,23 @@ from logging import DEBUG, INFO
 # .. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
 
 __all__ = [
-    "get_rootlogger",
-    "get_module_logger",
-    "log_to_stderr",
-    "temporary_filter",
     "DEBUG",
-    "INFO",
     "DEFAULT_LEVEL",
+    "INFO",
     "LOGGER_NAME",
+    "get_module_logger",
+    "get_rootlogger",
+    "log_to_stderr",
     "method_logger",
+    "temporary_filter",
 ]
 LOGGER_NAME = "EMA"
 DEFAULT_LEVEL = DEBUG
-INFO = INFO
+INFO = INFO  #  noqa PLW0127
 
 
-def create_module_logger(name=None):
+def create_module_logger(name: str | None = None) -> logging.Logger:
+    """Create a module logger with the given name."""
     if name is None:
         frm = inspect.stack()[1]
         mod = inspect.getmodule(frm[0])
@@ -44,7 +44,8 @@ def create_module_logger(name=None):
     return logger
 
 
-def get_module_logger(name):
+def get_module_logger(name: str) -> logging.Logger:
+    """Return a module logger with the given name."""
     try:
         logger = _module_loggers[name]
     except KeyError:
@@ -61,22 +62,28 @@ LOG_FORMAT = "[%(processName)s/%(levelname)s] %(message)s"
 
 
 class TemporaryFilter(logging.Filter):
-    def __init__(self, *args, level=0, funcname=None, **kwargs):
+    """Helper class to temporarily log messages."""
+
+    def __init__(self, *args, level: int = 0, func_name: str | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.level = level
-        self.funcname = funcname
+        self.func_name = func_name
 
-    def filter(self, record):
-        if self.funcname:
-            if self.funcname != record.funcName:
-                return True
+    def filter(self, record) -> bool:
+        """Filter out the message."""
+        if self.func_name and self.func_name == record.funcName:
+            return True
 
         return record.levelno > self.level
 
 
 @contextmanager
-def temporary_filter(name=LOGGER_NAME, level=0, functname=None):
-    """temporary filter log message
+def temporary_filter(
+    name: str | list[str] = LOGGER_NAME,
+    level: int | list[int] = 0,
+    func_name: str | list[str] | None = None,
+):
+    """Temporary filter log message.
 
     Parameters
     ----------
@@ -84,7 +91,7 @@ def temporary_filter(name=LOGGER_NAME, level=0, functname=None):
            logger on which to apply the filter.
     level: int, or list of int, optional
            don't log message of this level or lower
-    funcname : str or list of str, optional
+    func_name : str or list of str, optional
             don't log message of this function
 
     all modules have their own unique logger
@@ -93,36 +100,30 @@ def temporary_filter(name=LOGGER_NAME, level=0, functname=None):
     """
     # TODO:: probably all three should be optionally a list so you
     # might filter multiple log message from different functions
-    if isinstance(name, str):
-        names = [name]
-    else:
-        names = name
+    names = [name] if isinstance(name, str) else name
+    levels = [level] if isinstance(level, int) else level
+    func_names = (
+        [func_name] if (isinstance(func_name, str) or func_name is None) else func_name
+    )
 
-    if isinstance(level, int):
-        levels = [level]
-    else:
-        levels = level
-
-    if isinstance(functname, str) or functname is None:
-        functnames = [functname]
-    else:
-        functnames = functname
     # get logger
     # add filter
-    max_length = max(len(names), len(levels), len(functnames))
+    max_length = max(len(names), len(levels), len(func_names))
 
     # make a list equal lengths?
     if len(names) < max_length:
         names = [name] * max_length
     if len(levels) < max_length:
         levels = [level] * max_length
-    if len(functnames) < max_length:
-        functnames = [functname] * max_length
+    if len(func_names) < max_length:
+        func_names = [func_name] * max_length
 
     filters = {}
-    for name, level, functname in zip(names, levels, functnames):
+    for name, level, func_name in zip(names, levels, func_names):
         logger = get_module_logger(name)
-        filter = TemporaryFilter(level=level, funcname=functname)  # @ReservedAssignment
+        filter = TemporaryFilter(
+            level=level, func_name=func_name
+        )  # @ReservedAssignment
 
         if logger == _logger:
             # root logger, add filter to handler rather than logger
@@ -140,7 +141,8 @@ def temporary_filter(name=LOGGER_NAME, level=0, functname=None):
         v.removeFilter(k)
 
 
-def method_logger(name):
+def method_logger(name: str) -> callable:
+    """Wrap method so that every call to it is logged."""
     logger = get_module_logger(name)
     classname = inspect.getouterframes(inspect.currentframe())[1][3]
 
@@ -159,16 +161,15 @@ def method_logger(name):
     return real_decorator
 
 
-def get_rootlogger():
-    """
-    Returns root logger used by the EMA workbench
+def get_rootlogger() -> logging.Logger:
+    """Returns root logger used by the EMA workbench.
 
     Returns
     -------
     the logger of the EMA workbench
 
     """
-    global _rootlogger
+    global _rootlogger  # noqa PLW0603
 
     if not _rootlogger:
         _rootlogger = logging.getLogger(LOGGER_NAME)
@@ -179,9 +180,8 @@ def get_rootlogger():
     return _rootlogger
 
 
-def log_to_stderr(level=None, pass_root_logger_level=False):
-    """
-    Turn on logging and add a handler which prints to stderr
+def log_to_stderr(level: int | None = None, pass_root_logger_level: bool = False) -> logging.Logger:
+    """Turn on logging and add a handler which prints to stderr.
 
     Parameters
     ----------
@@ -193,7 +193,6 @@ def log_to_stderr(level=None, pass_root_logger_level=False):
             Recommended True when using the MPIEvaluator.
 
     """
-
     if not level:
         level = DEFAULT_LEVEL
 
@@ -201,7 +200,9 @@ def log_to_stderr(level=None, pass_root_logger_level=False):
 
     # avoid creation of multiple stream handlers for logging to console
     for entry in logger.handlers:
-        if (isinstance(entry, logging.StreamHandler)) and (entry.formatter._fmt == LOG_FORMAT):
+        if (isinstance(entry, logging.StreamHandler)) and (
+            entry.formatter._fmt == LOG_FORMAT
+        ):
             return logger
 
     formatter = logging.Formatter(LOG_FORMAT)

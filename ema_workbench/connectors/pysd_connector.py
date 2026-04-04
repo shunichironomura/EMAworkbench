@@ -1,6 +1,4 @@
-"""
-pysd connector
-"""
+"""pysd connector."""
 
 import os
 
@@ -8,13 +6,15 @@ import pysd
 
 from ema_workbench.em_framework.model import SingleReplication
 from ema_workbench.util.ema_logging import method_logger
+
+from .. import Sample
 from ..em_framework.model import AbstractModel
 
 __all__ = ["PysdModel"]
 
 
 class BasePysdModel(AbstractModel):
-    """Pysd model wrapper
+    """Pysd model wrapper.
 
     Parameters
     ----------
@@ -31,11 +31,11 @@ class BasePysdModel(AbstractModel):
     """
 
     @property
-    def mdl_file(self):
+    def mdl_file(self) -> str:
         return self._mdl_file
 
     @mdl_file.setter
-    def mdl_file(self, mdl_file):
+    def mdl_file(self, mdl_file: str) -> None:
         if not mdl_file.endswith(".mdl"):
             raise ValueError("model file needs to be a vensim .mdl file")
         if not os.path.isfile(mdl_file):
@@ -47,13 +47,15 @@ class BasePysdModel(AbstractModel):
         self.py_model_name = mdl_file.replace(".mdl", ".py")
         self._mdl_file = mdl_file
 
-    def __init__(self, name, mdl_file=None):
+    def __init__(self, name: str, mdl_file: str | None = None):
+        """Init."""
         super().__init__(name)
         self.mdl_file = mdl_file
         self.model = None
 
     @method_logger(__name__)
-    def model_init(self, policy, **kwargs):
+    def model_init(self, policy: Sample, **kwargs) -> None:
+        """Initialize the model."""
         super().model_init(policy)
 
         # TODO:: should be updated only if mdl file has been changed
@@ -61,17 +63,18 @@ class BasePysdModel(AbstractModel):
         self.model = pysd.read_vensim(self.mdl_file)
 
     @method_logger(__name__)
-    def run_experiment(self, experiment):
+    def run_experiment(self, experiment) -> dict:
+        """Run the experiment."""
         res = self.model.run(params=experiment, return_columns=self.output_variables)
 
         # EMA wants output formatted properly
         output = {col: series.values for col, series in res.items()}
         return output
 
-    def reset_model(self):
-        """
-        Method for resetting the model to its initial state. The default
-        implementation only sets the outputs to an empty dict.
+    def reset_model(self) -> None:
+        """Method for resetting the model to its initial state.
+
+        The default implementation only sets the outputs to an empty dict.
 
         """
         super().reset_model()
@@ -80,4 +83,4 @@ class BasePysdModel(AbstractModel):
 
 
 class PysdModel(SingleReplication, BasePysdModel):
-    pass
+    """Pysd model."""

@@ -1,10 +1,11 @@
-"""
-helper module for running experiments and keeping track of which model
-has been initialized with which policy.
-"""
+"""helper module for running individual experiments."""
 
 from ema_workbench.util.ema_logging import method_logger
-from ..util import get_module_logger, EMAError, CaseError
+
+from ..util import EMAError, ExperimentError, get_module_logger
+from .model import AbstractModel
+from .points import Sample
+from .util import NamedObjectMap
 
 # Created on Aug 11, 2015
 #
@@ -15,7 +16,7 @@ _logger = get_module_logger(__name__)
 
 
 class ExperimentRunner:
-    """Helper class for running the experiments
+    """Helper class for running the experiments.
 
     This class contains the logic for initializing models properly,
     running the experiment, getting the results, and cleaning up afterwards.
@@ -38,21 +39,27 @@ class ExperimentRunner:
     """
 
     def __init__(self, msis):
-        self.msis = msis
+        """Init."""
+        self.msis = NamedObjectMap(AbstractModel)
+        self.msis.extend(msis)
+
         self.log_message = (
-            "running scenario {scenario_id} for policy " "{policy_name} on model {model_name}"
+            "running scenario {scenario_id} for policy "
+            "{policy_name} on model {model_name}"
         )
 
     @method_logger(__name__)
     def cleanup(self):
+        """Cleanup after running."""
         for msi in self.msis:
             msi.cleanup()
         self.msis = None
 
     @method_logger(__name__)
     def run_experiment(self, experiment):
-        """The logic for running a single experiment. This code makes
-        sure that model(s) are initialized correctly.
+        """The logic for running a single experiment.
+
+        This code makes sure that model(s) are initialized correctly.
 
         Parameters
         ----------
@@ -82,6 +89,8 @@ class ExperimentRunner:
         scenario = experiment.scenario.copy()
         scenario_id = experiment.scenario.name
 
+        constants = Sample(**{c.name: c.value for c in model.constants})
+
         _logger.debug(
             self.log_message.format(
                 scenario_id=scenario_id, policy_name=policy_name, model_name=model_name
@@ -89,23 +98,20 @@ class ExperimentRunner:
         )
 
         try:
-            model.run_model(scenario, policy)
-        except CaseError as e:
+            model.run_model(scenario, policy, constants)
+        except ExperimentError as e:
             _logger.warning(str(e))
         except Exception as e:
             _logger.exception(str(e))
             try:
                 self.cleanup()
-            except Exception:
-                raise e
-
-            #             exception = traceback.print_exc()
-            #             if exception:
-            #                 sys.stderr.write(exception)
-            #                 sys.stderr.write("\n")
+            except Exception as e2:
+                raise e2
 
             errortype = type(e).__name__
-            raise EMAError(f"Exception in run_model\nCaused by: {errortype}: {str(e)}")
+            raise EMAError(
+                f"Exception in run_model\nCaused by: {errortype}: {e!s}"
+            ) from e
 
         outcomes = model.outcomes_output
         model.reset_model()

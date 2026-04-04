@@ -2,13 +2,10 @@
 
 import unittest
 import unittest.mock as mock
+
 import scipy as sp
 
 from ema_workbench.em_framework import parameters
-from ema_workbench.em_framework.points import Scenario, Policy
-from ema_workbench.em_framework.samplers import LHSSampler
-from ema_workbench.em_framework.model import Model
-from ema_workbench.em_framework.util import NamedObject
 
 
 class RealParameterTestCase(unittest.TestCase):
@@ -17,7 +14,7 @@ class RealParameterTestCase(unittest.TestCase):
         resolution = [0, 1, 2]
         lower_bound = 0
         upper_bound = 2.1
-        par = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+        par = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
 
         self.assertEqual(par.name, name)
         self.assertEqual(par.resolution, resolution)
@@ -30,30 +27,30 @@ class RealParameterTestCase(unittest.TestCase):
         upper_bound = 0
 
         with self.assertRaises(ValueError):
-            par = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+            par = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
 
         with self.assertRaises(ValueError):
             resolution = [-1, 0]
-            par = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+            par = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
 
             resolution = [0, 1, 3]
-            par = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+            par = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
 
     def test_comparison(self):
         name = "test"
         resolution = [0, 1, 2]
         lower_bound = 0
         upper_bound = 2.0
-        par1 = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
-        par2 = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+        par1 = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
+        par2 = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
 
         self.assertTrue(par1 == par2)
 
         name = "test"
-        par1 = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+        par1 = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
 
         name = "what"
-        par2 = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+        par2 = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
         self.assertFalse(par1 == par2)
 
     def test_dist(self):
@@ -61,7 +58,7 @@ class RealParameterTestCase(unittest.TestCase):
         resolution = [0, 1, 2]
         lower_bound = 0
         upper_bound = 2.1
-        par = parameters.RealParameter(name, lower_bound, upper_bound, resolution)
+        par = parameters.RealParameter(name, lower_bound, upper_bound, resolution=resolution)
 
         self.assertEqual(par.dist.dist.name, "uniform")
         self.assertEqual(par.lower_bound, lower_bound)
@@ -69,7 +66,9 @@ class RealParameterTestCase(unittest.TestCase):
 
     def test_from_dist(self):
         par = parameters.RealParameter.from_dist(
-            "test", sp.stats.uniform(0, 1), resolution=[0, 1]  # @UndefinedVariable
+            "test",
+            sp.stats.uniform(0, 1),
+            resolution=[0, 1],  # @UndefinedVariable
         )
 
         self.assertEqual(par.name, "test")
@@ -79,9 +78,13 @@ class RealParameterTestCase(unittest.TestCase):
         self.assertEqual(par.resolution, [0, 1])
 
         with self.assertRaises(ValueError):
-            parameters.RealParameter.from_dist("test", sp.stats.randint(0, 1))  # @UndefinedVariable
             parameters.RealParameter.from_dist(
-                "test", sp.stats.uniform(0, 1), blaat=[0, 1]  # @UndefinedVariable
+                "test", sp.stats.randint(0, 1)
+            )  # @UndefinedVariable
+            parameters.RealParameter.from_dist(
+                "test",
+                sp.stats.uniform(0, 1),
+                blaat=[0, 1],  # @UndefinedVariable
             )
 
 
@@ -91,7 +94,7 @@ class IntegerParameterTestCase(unittest.TestCase):
         resolution = [0, 1, 2]
         lower_bound = 0
         upper_bound = 2
-        par = parameters.IntegerParameter(name, lower_bound, upper_bound, resolution)
+        par = parameters.IntegerParameter(name, lower_bound, upper_bound, resolution=resolution)
 
         self.assertEqual(par.name, name)
         self.assertEqual(par.resolution, resolution)
@@ -104,29 +107,37 @@ class IntegerParameterTestCase(unittest.TestCase):
         upper_bound = 0
 
         with self.assertRaises(ValueError):
-            par = parameters.IntegerParameter(name, lower_bound, upper_bound, resolution)
+            par = parameters.IntegerParameter(
+                name, lower_bound, upper_bound, resolution=resolution
+            )
 
         with self.assertRaises(ValueError):
             resolution = [-1, 0]
-            par = parameters.IntegerParameter(name, lower_bound, upper_bound, resolution)
+            par = parameters.IntegerParameter(
+                name, lower_bound, upper_bound, resolution=resolution
+            )
 
             resolution = [0, 1, 3]
-            par = parameters.IntegerParameter(name, lower_bound, upper_bound, resolution)
+            par = parameters.IntegerParameter(
+                name, lower_bound, upper_bound, resolution=resolution
+            )
 
         with self.assertRaises(ValueError):
-            par = parameters.IntegerParameter(name, lower_bound, 2.1, resolution)
+            par = parameters.IntegerParameter(name, lower_bound, 2.1, resolution=resolution)
 
-            par = parameters.IntegerParameter(name, 0.0, 2, resolution)
+            par = parameters.IntegerParameter(name, 0.0, 2, resolution=resolution)
 
         with self.assertRaises(ValueError):
-            par = parameters.IntegerParameter(name, lower_bound, upper_bound, [0, 1.5, 2])
+            par = parameters.IntegerParameter(
+                name, lower_bound, upper_bound, resolution=[0, 1.5, 2]
+            )
 
     def test_dist(self):
         name = "test"
         resolution = [0, 1, 2]
         lower_bound = 0
         upper_bound = 2
-        par = parameters.IntegerParameter(name, lower_bound, upper_bound, resolution)
+        par = parameters.IntegerParameter(name, lower_bound, upper_bound, resolution=resolution)
 
         self.assertEqual(par.dist.dist.name, "randint")
         self.assertEqual(par.lower_bound, lower_bound)
@@ -134,7 +145,9 @@ class IntegerParameterTestCase(unittest.TestCase):
 
     def test_from_dist(self):
         par = parameters.IntegerParameter.from_dist(
-            "test", sp.stats.randint(0, 10), resolution=[0, 9]  # @UndefinedVariable
+            "test",
+            sp.stats.randint(0, 10),
+            resolution=[0, 9],  # @UndefinedVariable
         )
 
         self.assertEqual(par.name, "test")
@@ -148,10 +161,14 @@ class IntegerParameterTestCase(unittest.TestCase):
                 "test", sp.stats.uniform(0, 1)
             )  # @UndefinedVariable
             parameters.IntegerParameter.from_dist(
-                "test", sp.stats.randint(0, 1), blaat=[0, 1]  # @UndefinedVariable
+                "test",
+                sp.stats.randint(0, 1),
+                blaat=[0, 1],  # @UndefinedVariable
             )
             parameters.IntegerParameter.from_dist(
-                "test", sp.stats.randint(0, 10), resolution=[0, 9]  # @UndefinedVariable
+                "test",
+                sp.stats.randint(0, 10),
+                resolution=[0, 9],  # @UndefinedVariable
             )
 
 
@@ -177,7 +194,7 @@ class CategoricalParameterTestCase(unittest.TestCase):
         with self.assertRaises(ValueError):
             par1.index_for_cat("c")
 
-    def test_cat_for_indext(self):
+    def test_cat_for_index(self):
         name = "test"
         values = ("a", "b")
         par1 = parameters.CategoricalParameter(name, values)
@@ -185,7 +202,7 @@ class CategoricalParameterTestCase(unittest.TestCase):
         self.assertEqual(par1.cat_for_index(0).name, "a")
         self.assertEqual(par1.cat_for_index(1).name, "b")
 
-        with self.assertRaises(KeyError):
+        with self.assertRaises(IndexError):
             par1.cat_for_index(3)
 
     def test_from_dist(self):

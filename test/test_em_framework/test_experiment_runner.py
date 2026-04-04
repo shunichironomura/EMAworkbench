@@ -1,74 +1,78 @@
-"""
-Created on Aug 11, 2015
+"""Unit tests for experiment runner."""
 
-.. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
-"""
+# Created on Aug 11, 2015
+#
+# .. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
 
-import unittest.mock as mock
 
 import unittest
+import unittest.mock as mock
 
 from ema_workbench.em_framework.experiment_runner import ExperimentRunner
-from ema_workbench.em_framework.model import Model, AbstractModel
-from ema_workbench.em_framework.util import NamedObjectMap
+from ema_workbench.em_framework.model import AbstractModel, Model
 from ema_workbench.em_framework.parameters import RealParameter
-from ema_workbench.em_framework.points import Scenario, Policy, Experiment
-from ema_workbench.util import EMAError, CaseError
+from ema_workbench.em_framework.points import Experiment, Sample
+from ema_workbench.em_framework.util import NamedObjectMap
+from ema_workbench.util import EMAError, ExperimentError
 
 
 class ExperimentRunnerTestCase(unittest.TestCase):
     def test_init(self):
         mockMSI = mock.Mock(spec=Model)
         mockMSI.name = "test"
-        msis = {"test": mockMSI}
+        runner = ExperimentRunner([mockMSI])
 
-        runner = ExperimentRunner(msis)
-
-        self.assertEqual(msis, runner.msis)
+        self.assertEqual(mockMSI, runner.msis[mockMSI.name])
 
     def test_run_experiment(self):
-        mockMSI = mock.Mock(spec=Model)
-        mockMSI.name = "test"
-        mockMSI.uncertainties = [RealParameter("a", 0, 10), RealParameter("b", 0, 10)]
+        mock_msi = mock.Mock(spec=Model)
+        mock_msi.name = "test"
+        mock_msi.uncertainties = [RealParameter("a", 0, 10), RealParameter("b", 0, 10)]
+        mock_msi.constants = []
 
-        msis = NamedObjectMap(AbstractModel)
-        msis["test"] = mockMSI
+        runner = ExperimentRunner([mock_msi])
 
-        runner = ExperimentRunner(msis)
-
-        experiment = Experiment("test", mockMSI.name, Policy("none"), Scenario(a=1, b=2), 0)
+        experiment = Experiment(
+            "test", mock_msi.name, Sample("none"), Sample(a=1, b=2), 0
+        )
 
         runner.run_experiment(experiment)
 
-        sc, p = mockMSI.run_model.call_args[0]
+        sc, p, c = mock_msi.run_model.call_args[0]
         self.assertEqual(sc.name, experiment.scenario.name)
         self.assertEqual(p, experiment.policy)
 
-        mockMSI.reset_model.assert_called_once_with()
+        mock_msi.reset_model.assert_called_once_with()
 
         # assert handling of case error
-        mockMSI = mock.Mock(spec=Model)
-        mockMSI.name = "test"
-        mockMSI.run_model.side_effect = Exception("some exception")
+        mock_msi = mock.Mock(spec=Model)
+        mock_msi.name = "test"
+        mock_msi.run_model.side_effect = Exception("some exception")
+        mock_msi.constants = []
         msis = NamedObjectMap(AbstractModel)
-        msis["test"] = mockMSI
+        msis["test"] = mock_msi
 
         runner = ExperimentRunner(msis)
 
-        experiment = Experiment("test", mockMSI.name, Policy("none"), Scenario(a=1, b=2), 0)
+        experiment = Experiment(
+            "test", mock_msi.name, Sample("none"), Sample(a=1, b=2), 0
+        )
 
         with self.assertRaises(EMAError):
             runner.run_experiment(experiment)
 
         # assert handling of case error
-        mockMSI = mock.Mock(spec=Model)
-        mockMSI.name = "test"
-        mockMSI.run_model.side_effect = CaseError("message", {})
+        mock_msi = mock.Mock(spec=Model)
+        mock_msi.name = "test"
+        mock_msi.run_model.side_effect = ExperimentError("message", {})
         msis = NamedObjectMap(AbstractModel)
-        msis["test"] = mockMSI
+        msis["test"] = mock_msi
+        mock_msi.constants = []
         runner = ExperimentRunner(msis)
 
-        experiment = Experiment("test", mockMSI.name, Policy("none"), Scenario(a=1, b=2), 0)
+        experiment = Experiment(
+            "test", mock_msi.name, Sample("none"), Sample(a=1, b=2), 0
+        )
         runner.run_experiment(experiment)
 
 

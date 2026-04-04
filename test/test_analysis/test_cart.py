@@ -1,5 +1,4 @@
-"""
-Created on May 22, 2015
+"""Created on May 22, 2015
 
 .. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
 """
@@ -11,7 +10,6 @@ import pandas as pd
 
 from ema_workbench.analysis import cart
 from ema_workbench.analysis.scenario_discovery_util import RuleInductionType
-
 from test import utilities
 
 
@@ -44,41 +42,6 @@ def scarcity_classify(outcomes):
 
 
 class CartTestCase(unittest.TestCase):
-    def test_setup_cart(self):
-        results = utilities.load_flu_data()
-
-        alg = cart.setup_cart(results, flu_classify, mass_min=0.05)
-
-        self.assertTrue(alg.mode == RuleInductionType.BINARY)
-
-        x, outcomes = results
-        y = {}
-
-        for k, v in outcomes.items():
-            y[k] = v[:, -1]
-
-        temp_results = (x, y)
-        alg = cart.setup_cart(temp_results, "deceased_population_region_1", mass_min=0.05)
-        self.assertTrue(alg.mode == RuleInductionType.REGRESSION)
-
-        n_cols = 5
-        unc = x.columns.values[0:n_cols]
-        alg = cart.setup_cart(results, flu_classify, mass_min=0.05, incl_unc=unc)
-        self.assertTrue(alg.mode == RuleInductionType.BINARY)
-        self.assertTrue(alg.x.shape[1] == n_cols)
-
-        with self.assertRaises(TypeError):
-            alg = cart.setup_cart(results, 10, mass_min=0.05)
-
-        # setup can be generalized --> cart and prim essentially the same
-        # underlying code so move to sdutil
-
-        # check include uncertainties
-
-        # string type
-        # --> classification vs. regression
-
-        # callable
 
     def test_boxes(self):
         np.random.seed(42)
@@ -150,21 +113,15 @@ class CartTestCase(unittest.TestCase):
         print(stats)
 
     def test_build_tree(self):
-        results = utilities.load_flu_data()
+        x, outcomes = utilities.load_flu_data()
 
-        alg = cart.setup_cart(results, flu_classify, mass_min=0.05)
+        y = flu_classify(outcomes)
+        alg = cart.CART(x, y, mass_min=0.05)
         alg.build_tree()
-
         self.assertTrue(isinstance(alg.clf, cart.tree.DecisionTreeClassifier))
 
-        x, outcomes = results
-        y = {}
-
-        for k, v in outcomes.items():
-            y[k] = v
-
-        temp_results = (x, y)
-        alg = cart.setup_cart(temp_results, "deceased_population_region_1", mass_min=0.05)
+        y = outcomes["deceased_population_region_1"][:, -1]
+        alg = cart.CART(x, y, mode=RuleInductionType.REGRESSION, mass_min=0.05)
         alg.build_tree()
         self.assertTrue(isinstance(alg.clf, cart.tree.DecisionTreeRegressor))
 

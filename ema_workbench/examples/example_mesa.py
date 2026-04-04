@@ -1,79 +1,81 @@
-"""
-
-This example is a proof of principle for how MESA models can be
-controlled using the ema_workbench.
-
-"""
+"""Example of using the workbench together with mesa."""
 
 # Import EMA Workbench modules
-from ema_workbench import (
-    ReplicatorModel,
-    RealParameter,
-    BooleanParameter,
-    IntegerParameter,
-    Constant,
-    ArrayOutcome,
-    perform_experiments,
-    save_results,
-    ema_logging,
-)
-
 # Necessary packages for the model
 import math
+import sys
 from enum import Enum
+
 import mesa
 import networkx as nx
+import numpy as np
+
+from ema_workbench import (
+    ArrayOutcome,
+    Constant,
+    IntegerParameter,
+    RealParameter,
+    ReplicatorModel,
+    ema_logging,
+    perform_experiments,
+)
 
 # MESA demo model "Virus on a Network", from https://github.com/projectmesa/mesa-examples/blob/d16736778fdb500a3e5e05e082b27db78673b562/examples/virus_on_network/virus_on_network/model.py
 
 
 class State(Enum):
+    """Possible states of an agent."""
+
     SUSCEPTIBLE = 0
     INFECTED = 1
     RESISTANT = 2
 
 
 def number_state(model, state):
-    return sum(1 for a in model.grid.get_all_cell_contents() if a.state is state)
+    """Helper function."""
+    return sum(1 for a in model.grid.agents if a.state is state)
 
 
 def number_infected(model):
+    """Helper function."""
     return number_state(model, State.INFECTED)
 
 
 def number_susceptible(model):
+    """Helper function."""
     return number_state(model, State.SUSCEPTIBLE)
 
 
 def number_resistant(model):
+    """Helper function."""
     return number_state(model, State.RESISTANT)
 
 
 class VirusOnNetwork(mesa.Model):
-    """A virus model with some number of agents"""
+    """A virus model with some number of agents."""
 
     def __init__(
         self,
-        num_nodes=10,
-        avg_node_degree=3,
-        initial_outbreak_size=1,
-        virus_spread_chance=0.4,
-        virus_check_frequency=0.4,
-        recovery_chance=0.3,
-        gain_resistance_chance=0.5,
+        num_nodes: int = 10,
+        avg_node_degree: int = 3,
+        initial_outbreak_size: int = 1,
+        virus_spread_chance: float = 0.4,
+        virus_check_frequency: float = 0.4,
+        recovery_chance: float = 0.3,
+        gain_resistance_chance: float = 0.5,
+        rng: int | None = None,
     ):
+        """Init."""
+        super().__init__(rng=rng)
         self.num_nodes = num_nodes
         prob = avg_node_degree / self.num_nodes
-        self.G = nx.erdos_renyi_graph(n=self.num_nodes, p=prob)
-        self.grid = mesa.space.NetworkGrid(self.G)
-        self.schedule = mesa.time.RandomActivation(self)
+        graph = nx.erdos_renyi_graph(n=self.num_nodes, p=prob)
+
+        self.grid = mesa.discrete_space.Network(graph, capacity=1, random=self.random)
+
         self.initial_outbreak_size = (
             initial_outbreak_size if initial_outbreak_size <= num_nodes else num_nodes
         )
-        self.virus_spread_chance = virus_spread_chance
-        self.virus_check_frequency = virus_check_frequency
-        self.recovery_chance = recovery_chance
-        self.gain_resistance_chance = gain_resistance_chance
 
         self.datacollector = mesa.DataCollector(
             {
@@ -84,56 +86,64 @@ class VirusOnNetwork(mesa.Model):
         )
 
         # Create agents
-        for i, node in enumerate(self.G.nodes()):
-            a = VirusAgent(
-                i,
-                self,
-                State.SUSCEPTIBLE,
-                self.virus_spread_chance,
-                self.virus_check_frequency,
-                self.recovery_chance,
-                self.gain_resistance_chance,
-            )
-            self.schedule.add(a)
-            # Add the agent to the node
-            self.grid.place_agent(a, node)
+        VirusAgent.create_agents(
+            self,
+            num_nodes,
+            State.SUSCEPTIBLE,
+            virus_spread_chance,
+            virus_check_frequency,
+            recovery_chance,
+            gain_resistance_chance,
+            list(self.grid.all_cells),
+        )
 
         # Infect some nodes
-        infected_nodes = self.random.sample(list(self.G), self.initial_outbreak_size)
-        for a in self.grid.get_cell_list_contents(infected_nodes):
+        infected_nodes = mesa.discrete_space.CellCollection(
+            self.random.sample(list(self.grid.all_cells), self.initial_outbreak_size),
+            random=self.random,
+        )
+        for a in infected_nodes.agents:
             a.state = State.INFECTED
 
         self.running = True
         self.datacollector.collect(self)
 
     def resistant_susceptible_ratio(self):
+        """Calculate ratio of resistant to susceptible."""
         try:
-            return number_state(self, State.RESISTANT) / number_state(self, State.SUSCEPTIBLE)
+            return number_state(self, State.RESISTANT) / number_state(
+                self, State.SUSCEPTIBLE
+            )
         except ZeroDivisionError:
             return math.inf
 
     def step(self):
-        self.schedule.step()
+        """A single step of the model."""
         # collect data
+        self.agents.shuffle_do("step")
         self.datacollector.collect(self)
 
     def run_model(self, n):
-        for i in range(n):
+        """Run the model for n steps."""
+        for _ in range(n):
             self.step()
 
 
-class VirusAgent(mesa.Agent):
+class VirusAgent(mesa.discrete_space.FixedAgent):
+    """A VirusAgent."""
+
     def __init__(
         self,
-        unique_id,
         model,
         initial_state,
         virus_spread_chance,
         virus_check_frequency,
         recovery_chance,
         gain_resistance_chance,
+        cell,
     ):
-        super().__init__(unique_id, model)
+        """Init."""
+        super().__init__(model)
 
         self.state = initial_state
 
@@ -141,23 +151,23 @@ class VirusAgent(mesa.Agent):
         self.virus_check_frequency = virus_check_frequency
         self.recovery_chance = recovery_chance
         self.gain_resistance_chance = gain_resistance_chance
+        self.cell = cell
 
-    def try_to_infect_neighbors(self):
-        neighbors_nodes = self.model.grid.get_neighborhood(self.pos, include_center=False)
-        susceptible_neighbors = [
-            agent
-            for agent in self.model.grid.get_cell_list_contents(neighbors_nodes)
-            if agent.state is State.SUSCEPTIBLE
-        ]
-        for a in susceptible_neighbors:
-            if self.random.random() < self.virus_spread_chance:
-                a.state = State.INFECTED
+    def try_infect_neighbors(self):
+        """Try to infect neighbors."""
+        for agent in self.cell.neighborhood.agents:
+            if (agent.state is State.SUSCEPTIBLE) and (
+                self.random.random() < self.virus_spread_chance
+            ):
+                agent.state = State.INFECTED
 
     def try_gain_resistance(self):
+        """Try to gain resistance."""
         if self.random.random() < self.gain_resistance_chance:
             self.state = State.RESISTANT
 
     def try_remove_infection(self):
+        """Try to remove infection."""
         # Try to remove
         if self.random.random() < self.recovery_chance:
             # Success
@@ -167,14 +177,18 @@ class VirusAgent(mesa.Agent):
             # Failed
             self.state = State.INFECTED
 
-    def try_check_situation(self):
-        if (self.random.random() < self.virus_check_frequency) and (self.state is State.INFECTED):
+    def check_situation(self):
+        """Check if the agent is infected and if so, see if she is cured."""
+        if (self.random.random() < self.virus_check_frequency) and (
+            self.state is State.INFECTED
+        ):
             self.try_remove_infection()
 
     def step(self):
+        """A single step of the model."""
         if self.state is State.INFECTED:
-            self.try_to_infect_neighbors()
-        self.try_check_situation()
+            self.try_infect_neighbors()
+        self.check_situation()
 
 
 # Setting up the model as a function
@@ -187,7 +201,9 @@ def model_virus_on_network(
     recovery_chance=1,
     gain_resistance_chance=1,
     steps=10,
+    rng=None,
 ):
+    """Run the model once."""
     # Initialising the model
     virus_on_network = VirusOnNetwork(
         num_nodes=num_nodes,
@@ -197,6 +213,7 @@ def model_virus_on_network(
         virus_check_frequency=virus_check_frequency,
         recovery_chance=recovery_chance,
         gain_resistance_chance=gain_resistance_chance,
+        rng=rng,
     )
 
     # Run the model steps times
@@ -240,11 +257,12 @@ if __name__ == "__main__":
         ArrayOutcome("Resistant"),
     ]
 
-    # Define the number of replications
-    model.replications = 5
+    # Define the number of replications and the seed for each of then
+    n_replications = 10
+    model.replications = [
+        {"rng": i}
+        for i in np.random.default_rng().integers(sys.maxsize, size=n_replications)
+    ]
 
     # Run experiments with the aforementioned parameters and outputs
-    results = perform_experiments(models=model, scenarios=20)
-
-    # Get the results
-    experiments, outcomes = results
+    experiments, outcomes = perform_experiments(models=model, scenarios=20)

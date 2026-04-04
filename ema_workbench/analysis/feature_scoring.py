@@ -1,5 +1,6 @@
-"""Feature scoring functionality"""
+"""Feature scoring functionality."""
 
+import contextlib
 import math
 from operator import itemgetter
 
@@ -11,10 +12,10 @@ from sklearn.ensemble import (
     RandomForestClassifier,
     RandomForestRegressor,
 )
-from sklearn.feature_selection import f_regression, f_classif, chi2
+from sklearn.feature_selection import chi2, f_classif, f_regression
 
-from .scenario_discovery_util import RuleInductionType
 from ..util import get_module_logger
+from .scenario_discovery_util import RuleInductionType
 
 # Created on Jul 9, 2014
 #
@@ -25,13 +26,13 @@ from ..util import get_module_logger
 
 
 __all__ = [
-    "F_REGRESSION",
-    "F_CLASSIFICATION",
     "CHI2",
-    "get_univariate_feature_scores",
-    "get_rf_feature_scores",
+    "F_CLASSIFICATION",
+    "F_REGRESSION",
     "get_ex_feature_scores",
     "get_feature_scores_all",
+    "get_rf_feature_scores",
+    "get_univariate_feature_scores",
 ]
 
 _logger = get_module_logger(__name__)
@@ -42,8 +43,7 @@ CHI2 = chi2
 
 
 def _prepare_experiments(experiments):
-    """
-    transform the experiments data frame into a numpy array.
+    """Transform the experiments data frame into a numpy array.
 
     Parameters
     ----------
@@ -54,10 +54,8 @@ def _prepare_experiments(experiments):
     ndarray, list
 
     """
-    try:
+    with contextlib.suppress(KeyError):
         experiments = experiments.drop("scenario", axis=1)
-    except KeyError:
-        pass
 
     x = experiments.copy()
 
@@ -67,7 +65,9 @@ def _prepare_experiments(experiments):
     for column in x_nominal_columns:
         if np.unique(x[column]).shape == (1,):
             x = x.drop(column, axis=1)
-            _logger.debug(f"{column} dropped from analysis because it has only a single category")
+            _logger.debug(
+                f"{column} dropped from analysis because it has only a single category"
+            )
         else:
             x[column] = x[column].astype("category").cat.codes
 
@@ -75,9 +75,7 @@ def _prepare_experiments(experiments):
 
 
 def _prepare_outcomes(outcomes, classify):
-    """
-    transform the outcomes dict into a vector with either the class allocation
-    or the value.
+    """Transform the outcomes dict into a vector with the class allocation or the value.
 
     Parameters
     ----------
@@ -94,7 +92,7 @@ def _prepare_outcomes(outcomes, classify):
         data is categorical (True) or continuous (False)
 
     Raises
-    --------
+    ------
     TypeError
         if classify is neither a StringType nor a callable
     KeyError
@@ -117,11 +115,10 @@ def _prepare_outcomes(outcomes, classify):
 
 
 def get_univariate_feature_scores(x, y, score_func=F_CLASSIFICATION):
-    """
+    """Calculate feature scores using univariate statistical tests.
 
-    calculate feature scores using univariate statistical tests. In case of
-    categorical data, chi square or the Anova F value is used. In case of
-    continuous data the Anova F value is used.
+    In case of categorical data, chi square or the Anova F value is used.
+    In case of continuous data the Anova F value is used.
 
     Parameters
     ----------
@@ -130,6 +127,7 @@ def get_univariate_feature_scores(x, y, score_func=F_CLASSIFICATION):
     score_func : {F_CLASSIFICATION, F_REGRESSION, CHI2}
                 the score function to use, one of f_regression (regression), or
                 f_classification or chi2 (classification).
+
     Returns
     -------
     pandas DataFrame
@@ -166,8 +164,7 @@ def get_rf_feature_scores(
     oob_score=True,
     random_state=None,
 ):
-    """
-    Get feature scores using a random forest
+    """Get feature scores using a random forest.
 
     Parameters
     ----------
@@ -251,8 +248,7 @@ def get_ex_feature_scores(
     oob_score=True,
     random_state=None,
 ):
-    """
-    Get feature scores using extra trees
+    """Get feature scores using extra trees.
 
     Parameters
     ----------
@@ -304,9 +300,9 @@ def get_ex_feature_scores(
     # then proportional based on sqrt of N
     # dus sqrt(N) / Sqrt(1000) met 1 also minimumd
     if max_features is None:
-        max_features = int(round(x.shape[1] / 3))
+        max_features = round(x.shape[1] / 3)
     if min_samples_leaf is None:
-        min_samples_leaf = max(1, int(round(math.sqrt(x.shape[0]) / math.sqrt(1000))))
+        min_samples_leaf = max(1, round(math.sqrt(x.shape[0]) / math.sqrt(1000)))
 
     if mode == RuleInductionType.CLASSIFICATION:
         etc = ExtraTreesClassifier
@@ -351,9 +347,10 @@ algorithms = {
 }
 
 
-def get_feature_scores_all(x, y, alg="extra trees", mode=RuleInductionType.REGRESSION, **kwargs):
-    """perform feature scoring for all outcomes using the specified feature
-    scoring algorithm
+def get_feature_scores_all(
+    x, y, alg="extra trees", mode=RuleInductionType.REGRESSION, **kwargs
+):
+    """Perform feature scoring for all outcomes using the specified feature scoring algorithm.
 
     Parameters
     ----------

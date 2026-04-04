@@ -1,39 +1,48 @@
+"""Utilities for futures modules."""
+
+from __future__ import annotations
+
 import os
 import random
 import shutil
 import string
 import time
-
-
 from collections import defaultdict
+from collections.abc import Collection
+from typing import TYPE_CHECKING
 
 from ..util import get_module_logger
 
+if TYPE_CHECKING:
+    from .model import AbstractModel
 
-__all__ = ["finalizer", "setup_working_directories", "determine_rootdir"]
+__all__ = ["determine_rootdir", "finalizer", "setup_working_directories"]
 
 _logger = get_module_logger(__name__)
 
 
-def determine_rootdir(msis):
+def determine_rootdir(msis: Collection[AbstractModel]) -> str | None:
+    """Determine common root directory for all models."""
     for model in msis:
         try:
-            model.working_directory
+            model.working_directory  # noqa: B018
         except AttributeError:
             root_dir = None
             break
     else:
-        random_part = [random.choice(string.ascii_letters + string.digits) for _ in range(5)]
+        random_part = [
+            random.choice(string.ascii_letters + string.digits) for _ in range(5)
+        ]
         random_part = "".join(random_part)
         root_dir = os.path.abspath("tmp" + random_part)
         os.makedirs(root_dir)
     return root_dir
 
 
-def finalizer(experiment_runner):
-    """cleanup"""
+def finalizer(experiment_runner: AbstractModel) -> callable:
+    """Cleanup."""
 
-    def finalizer(tmpdir):
+    def finalizer(tmpdir: str | None) -> None:
         _logger.info("finalizing")
 
         experiment_runner.cleanup()
@@ -50,9 +59,11 @@ def finalizer(experiment_runner):
     return finalizer
 
 
-def setup_working_directories(models, root_dir):
-    """copies the working directory of each model to a process specific
-    temporary directory and update the working directory of the model
+def setup_working_directories(models: Collection[AbstractModel], root_dir: str) -> str | None:
+    """Setup working directories when running in parallel.
+
+    Copies the working directory of each model to a process specific
+    temporary directory and update the working directory of the model.
 
     Parameters
     ----------
@@ -60,7 +71,6 @@ def setup_working_directories(models, root_dir):
     root_dir : str
 
     """
-
     # group models by working directory to avoid copying the same directory
     # multiple times
     wd_by_model = defaultdict(list)

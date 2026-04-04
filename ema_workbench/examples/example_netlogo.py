@@ -1,21 +1,20 @@
-"""
+"""Illustration of using netlogo models with the workbench.
 
-This example is a proof of principle for how NetLogo models can be
-controlled using pyNetLogo and the ema_workbench. Note that this
-example uses the NetLogo 6 version of the predator prey model that
-comes with NetLogo. If you are using NetLogo 5, replace the model file
-with the one that comes with NetLogo.
+Note that this example uses the NetLogo 6 version of the predator prey model that
+comes with NetLogo. This works fine also with NetLogo 7.
+
+If you are using NetLogo 5, replace the model file with the one that comes with NetLogo.
 
 """
 
 import numpy as np
 
 from ema_workbench import (
+    MultiprocessingEvaluator,
     RealParameter,
-    ema_logging,
     ScalarOutcome,
     TimeSeriesOutcome,
-    MultiprocessingEvaluator,
+    ema_logging,
 )
 from ema_workbench.connectors.netlogo import NetLogoModel
 
@@ -29,7 +28,9 @@ if __name__ == "__main__":
     ema_logging.log_to_stderr(ema_logging.INFO)
 
     model = NetLogoModel(
-        "predprey", wd="./models/predatorPreyNetlogo", model_file="Wolf Sheep Predation.nlogo"
+        "predprey",
+        wd="./models/predatorPreyNetlogo",
+        model_file="Wolf Sheep Predation.nlogo",
     )
     model.run_length = 100
     model.replications = 10
@@ -51,7 +52,9 @@ if __name__ == "__main__":
     # perform experiments
     n = 10
 
-    with MultiprocessingEvaluator(model, n_processes=-1, maxtasksperchild=4) as evaluator:
+    with MultiprocessingEvaluator(
+        model, n_processes=-1, maxtasksperchild=4
+    ) as evaluator:
         results = evaluator.perform_experiments(n)
 
     print()

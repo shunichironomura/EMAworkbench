@@ -1,82 +1,85 @@
-"""
-collection of evaluators for performing experiments, optimization, and robust
-optimization
+"""collection of evaluators for performing experiments, optimization, and robust optimization."""
 
-"""
-
+import abc
 import enum
 import numbers
 import os
+from collections.abc import Callable, Iterable
+from typing import Literal, overload
+
+import numpy as np
+import pandas as pd
+import platypus
+from platypus import AbstractGeneticAlgorithm, EpsNSGAII, Variator
 
 from ema_workbench.em_framework.samplers import AbstractSampler
-from .callbacks import DefaultCallback
-from .points import experiment_generator, Scenario, Policy
+
+from ..util import EMAError, get_module_logger
+from .callbacks import AbstractCallback, DefaultCallback
 from .experiment_runner import ExperimentRunner
 from .model import AbstractModel
 from .optimization import (
-    evaluate_robust,
-    evaluate,
-    EpsNSGAII,
-    to_problem,
-    to_robust_problem,
-    process_levers,
-    process_uncertainties,
-    process_robust,
+    Problem,
     _optimize,
+    evaluate,
+    process_jobs,
 )
-from .outcomes import ScalarOutcome, AbstractOutcome
-from .salib_samplers import SobolSampler, MorrisSampler, FASTSampler
+from .outcomes import Constraint, Outcome, ScalarOutcome
+from .parameters import Parameter
+from .points import Experiment, Sample, SampleCollection, experiment_generator
+from .salib_samplers import FASTSampler, MorrisSampler, SobolSampler
 from .samplers import (
-    MonteCarloSampler,
     FullFactorialSampler,
     LHSSampler,
-    UniformLHSSampler,
-    sample_levers,
-    sample_uncertainties,
+    MonteCarloSampler,
 )
-from .util import NamedObjectMap, determine_objects
-from ..util import EMAError, get_module_logger, ema_logging
-
+from .util import StdlibSeedLike, determine_objects
 
 # Created on 5 Mar 2017
 #
 # .. codeauthor::jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
 
 __all__ = [
+    "BaseEvaluator",
+    "Samplers",
+    "SequentialEvaluator",
     "optimize",
     "perform_experiments",
-    "SequentialEvaluator",
-    "Samplers",
 ]
 
 _logger = get_module_logger(__name__)
 
 
 class Samplers(enum.Enum):
-    """
-    Enum for different kinds of samplers
-    """
+    """Enum for different kinds of samplers."""
 
     ## TODO:: have samplers register themselves on class instantiation
     ## TODO:: should not be defined here
 
     MC = MonteCarloSampler()
     LHS = LHSSampler()
-    UNIFORM_LHS = UniformLHSSampler()
     FF = FullFactorialSampler()
     SOBOL = SobolSampler()
     FAST = FASTSampler()
     MORRIS = MorrisSampler()
 
 
-class BaseEvaluator:
-    """evaluator for experiments using a multiprocessing pool
+type SamplerTypes = Literal[
+    Samplers.MC,
+    Samplers.LHS,
+    Samplers.FF,
+    Samplers.SOBOL,
+    Samplers.FAST,
+    Samplers.MORRIS,
+]
+
+
+class BaseEvaluator(abc.ABC):
+    """evaluator for experiments using a multiprocessing pool.
 
     Parameters
     ----------
     msis : collection of models
-    searchover : {None, 'levers', 'uncertainties'}, optional
-                  to be used in combination with platypus
 
     Raises
     ------
@@ -86,7 +89,7 @@ class BaseEvaluator:
 
     reporting_frequency = 3
 
-    def __init__(self, msis):
+    def __init__(self, msis: AbstractModel | list[AbstractModel]):
         super().__init__()
 
         if isinstance(msis, AbstractModel):
@@ -101,34 +104,32 @@ class BaseEvaluator:
         self._msis = msis
         self.callback = None
 
-    def __enter__(self):
+    def __enter__(self):  # noqa: D105
         self.initialize()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):  # noqa: D105
         self.finalize()
 
         if exc_type is not None:
             return False
 
+    @abc.abstractmethod
     def initialize(self):
-        """initialize the evaluator"""
-        raise NotImplementedError
+        """Initialize the evaluator."""
 
+    @abc.abstractmethod
     def finalize(self):
-        """finalize the evaluator"""
-        raise NotImplementedError
+        """Finalize the evaluator."""
 
-    def evaluate_experiments(self, scenarios, policies, callback, combine="factorial", **kwargs):
-        """used by ema_workbench"""
-        raise NotImplementedError
+    @abc.abstractmethod
+    def evaluate_experiments(
+        self, experiments: Iterable[Experiment], callback: Callable, **kwargs
+    ):
+        """Used by ema_workbench."""
 
-    def evaluate_all(self, jobs, **kwargs):
-        """makes ema_workbench evaluators compatible with Platypus
-        evaluators as used by platypus algorithms
-        """
-        self.callback()
-
+    def evaluate_all(self, jobs: list[platypus.core.EvaluateSolution], **kwargs):
+        """Makes ema_workbench evaluators compatible with platypus evaluators."""
         try:
             problem = jobs[0].solution.problem
         except IndexError:
@@ -137,17 +138,15 @@ class BaseEvaluator:
 
         searchover = problem.searchover
 
-        if searchover == "levers":
-            scenarios, policies = process_levers(jobs)
-            jobs_collection = zip(policies, jobs)
-        elif searchover == "uncertainties":
-            scenarios, policies = process_uncertainties(jobs)
-            jobs_collection = zip(scenarios, jobs)
-        elif searchover == "robust":
-            scenarios, policies = process_robust(jobs)
-            jobs_collection = zip(policies, jobs)
-        else:
-            raise NotImplementedError()
+        scenarios, policies = process_jobs(jobs)
+
+        match searchover:
+            case "levers" | "robust":
+                jobs_collection = zip(policies, jobs)
+            case "uncertainties":
+                jobs_collection = zip(scenarios, jobs)
+            case _:
+                raise NotImplementedError()
 
         # overwrite the default 10 progress reports  with 5 reports
         callback = perform_experiments(
@@ -162,36 +161,35 @@ class BaseEvaluator:
 
         experiments, outcomes = callback.get_results()
 
-        if searchover in ("levers", "uncertainties"):
-            evaluate(jobs_collection, experiments, outcomes, problem)
-        else:
-            evaluate_robust(jobs_collection, experiments, outcomes, problem)
+        evaluate(jobs_collection, experiments, outcomes, problem)
 
         return jobs
 
     def perform_experiments(
         self,
-        scenarios=0,
-        policies=0,
-        reporting_interval=None,
-        reporting_frequency=10,
-        uncertainty_union=False,
-        lever_union=False,
-        outcome_union=False,
-        uncertainty_sampling=Samplers.LHS,
-        lever_sampling=Samplers.LHS,
-        callback=None,
-        combine="factorial",
+        scenarios: int | Iterable[Sample] | Sample = 0,
+        policies: int | Iterable[Sample] | Sample = 0,
+        reporting_interval: int | None = None,
+        reporting_frequency: int | None = 10,
+        uncertainty_union: bool = False,
+        lever_union: bool = False,
+        outcome_union: bool = False,
+        uncertainty_sampling: AbstractSampler | SamplerTypes = Samplers.LHS,
+        uncertainty_sampling_kwargs: dict | None = None,
+        lever_sampling: AbstractSampler | SamplerTypes = Samplers.LHS,
+        lever_sampling_kwargs: dict | None = None,
+        callback: type[AbstractCallback] | None = None,
+        combine: Literal["full_factorial", "sample", "cycle"] = "full_factorial",
         **kwargs,
     ):
-        """convenience method for performing experiments.
+        """Convenience method for performing experiments.
 
-        is forwarded to :func:perform_experiments, with evaluator and
+        A call to this method is forwarded to :func:perform_experiments, with evaluator and
         models arguments added in.
 
         """
         return perform_experiments(
-            self._msis,
+            self._msis.copy(),
             scenarios=scenarios,
             policies=policies,
             evaluator=self,
@@ -201,32 +199,82 @@ class BaseEvaluator:
             lever_union=lever_union,
             outcome_union=outcome_union,
             uncertainty_sampling=uncertainty_sampling,
+            uncertainty_sampling_kwargs=uncertainty_sampling_kwargs,
             lever_sampling=lever_sampling,
+            lever_sampling_kwargs=lever_sampling_kwargs,
             callback=callback,
             combine=combine,
             **kwargs,
         )
 
+    @overload
+    def optimize(
+            self,
+            algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+            nfe: int = 10000,
+            searchover: str = "levers",
+            reference: Sample | None = None,
+            constraints: Iterable[Constraint] | None = None,
+            convergence_freq: int = 1000,
+            logging_freq: int = 5,
+            variator: type[Variator] | None = None,
+            rng: Iterable[StdlibSeedLike] | None = None,
+            initial_population: Iterable[Sample] | None = None,
+            filename: str | None = None,
+            directory: str | None = None,
+            **kwargs,
+    ) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
+        ...
+
+    @overload
+    def optimize(
+            self,
+            algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+            nfe: int = 10000,
+            searchover: str = "levers",
+            reference: Sample | None = None,
+            constraints: Iterable[Constraint] | None = None,
+            convergence_freq: int = 1000,
+            logging_freq: int = 5,
+            variator: type[Variator] | None = None,
+            rng: StdlibSeedLike | None = None,
+            initial_population: Iterable[Sample] | None = None,
+            filename: str | None = None,
+            directory: str | None = None,
+            **kwargs,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        ...
+
     def optimize(
         self,
-        algorithm=EpsNSGAII,
-        nfe=10000,
-        searchover="levers",
-        reference=None,
-        constraints=None,
-        convergence_freq=1000,
-        logging_freq=5,
-        variator=None,
+        algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+        nfe: int = 10000,
+        searchover: str = "levers",
+        reference: Sample | None = None,
+        constraints: Iterable[Constraint] | None = None,
+        convergence_freq: int = 1000,
+        logging_freq: int = 5,
+        variator: type[Variator] | None = None,
+        rng: StdlibSeedLike | Iterable[StdlibSeedLike] | None = None,
+        initial_population: Iterable[Sample] | None = None,
+        filename: str | None = None,
+        directory: str | None = None,
         **kwargs,
     ):
-        """convenience method for outcome optimization.
+        """Convenience method for outcome optimization.
 
-        is forwarded to :func:optimize, with evaluator and models
+        A call to this method is forwarded to :func:optimize, with evaluator and models
         arguments added in.
 
         """
+        if len(self._msis) > 1:
+            raise NotImplementedError(
+                "Optimization over multiple models is not yet supported"
+            )
+        model = self._msis[0]
+
         return optimize(
-            self._msis,
+            model,
             algorithm=algorithm,
             nfe=int(nfe),
             searchover=searchover,
@@ -236,58 +284,70 @@ class BaseEvaluator:
             convergence_freq=convergence_freq,
             logging_freq=logging_freq,
             variator=variator,
+            rng=rng,
+            filename=filename,
+            directory=directory,
+            initial_population=initial_population,
             **kwargs,
         )
 
     def robust_optimize(
         self,
-        robustness_functions,
-        scenarios,
-        algorithm=EpsNSGAII,
-        nfe=10000,
-        convergence_freq=1000,
-        logging_freq=5,
+        robustness_functions: list[ScalarOutcome],
+        scenarios: int | Iterable[Sample],
+        algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+        nfe: int = 10000,
+        convergence_freq: int = 1000,
+        logging_freq: int = 5,
+        rng: StdlibSeedLike | Iterable[StdlibSeedLike] | None = None,
         **kwargs,
-    ):
-        """convenience method for robust optimization.
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Convenience method for robust optimization.
 
-        is forwarded to :func:robust_optimize, with evaluator and models
+        A call to this method is forwarded to :func:robust_optimize, with evaluator and models
         arguments added in.
 
         """
+        if len(self._msis) > 1:
+            raise NotImplementedError(
+                "Optimization over multiple models is not yet supported"
+            )
+        model = self._msis[0]
+
         return robust_optimize(
-            self._msis,
+            model,
             robustness_functions,
             scenarios,
-            self,
+            evaluator=self,
             algorithm=algorithm,
             nfe=nfe,
             convergence_freq=convergence_freq,
             logging_freq=logging_freq,
+            rng=rng,
             **kwargs,
         )
 
 
 class SequentialEvaluator(BaseEvaluator):
+    """Sequential evaluator."""
+
     def initialize(self):
-        pass
+        """Initializer."""
 
     def finalize(self):
-        pass
+        """Finalizer."""
 
-    def evaluate_experiments(self, scenarios, policies, callback, combine="factorial"):
+    def evaluate_experiments(
+        self, experiments: Iterable[Experiment], callback: Callable, **kwargs
+    ):
+        """Evaluate experiments."""
         _logger.info("performing experiments sequentially")
-
-        ex_gen = experiment_generator(scenarios, self._msis, policies, combine=combine)
-
-        models = NamedObjectMap(AbstractModel)
-        models.extend(self._msis)
 
         # TODO:: replace with context manager
         cwd = os.getcwd()
-        runner = ExperimentRunner(models)
+        runner = ExperimentRunner(self._msis)
 
-        for experiment in ex_gen:
+        for experiment in experiments:
             outcomes = runner.run_experiment(experiment)
             callback(experiment, outcomes)
         runner.cleanup()
@@ -295,48 +355,51 @@ class SequentialEvaluator(BaseEvaluator):
 
 
 def perform_experiments(
-    models,
-    scenarios=0,
-    policies=0,
-    evaluator=None,
-    reporting_interval=None,
-    reporting_frequency=10,
-    uncertainty_union=False,
-    lever_union=False,
-    outcome_union=False,
-    uncertainty_sampling=Samplers.LHS,
-    lever_sampling=Samplers.LHS,
-    callback=None,
-    return_callback=False,
-    combine="factorial",
-    log_progress=False,
+    models: AbstractModel | list[AbstractModel],
+    scenarios: int | Iterable[Sample] | Sample = 0,
+    policies: int | Iterable[Sample] | Sample = 0,
+    evaluator: BaseEvaluator | None = None,
+    reporting_interval: int | None = None,
+    reporting_frequency: int | None = 10,
+    uncertainty_union: bool = False,
+    lever_union: bool = False,
+    outcome_union: bool = False,
+    uncertainty_sampling: AbstractSampler | SamplerTypes = Samplers.LHS,
+    uncertainty_sampling_kwargs: dict | None = None,
+    lever_sampling: AbstractSampler | SamplerTypes = Samplers.LHS,
+    lever_sampling_kwargs: dict | None = None,
+    callback: type[AbstractCallback] | None = None,
+    return_callback: bool = False,
+    combine: Literal["full_factorial", "sample", "cycle"] = "full_factorial",
+    log_progress: bool = False,
     **kwargs,
-):
-    """sample uncertainties and levers, and perform the resulting experiments
-    on each of the models
+) -> DefaultCallback | tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """Sample uncertainties and levers, and perform the resulting experiments on each of the models.
 
     Parameters
     ----------
     models : one or more AbstractModel instances
-    scenarios : int or collection of Scenario instances, optional
-    policies :  int or collection of Policy instances, optional
+    scenarios : int or iterable of Sample instances, optional
+    policies :  int or iterable of Sample instances, optional
     evaluator : Evaluator instance, optional
     reporting_interval : int, optional
     reporting_frequency: int, optional
     uncertainty_union : boolean, optional
     lever_union : boolean, optional
     outcome_union : boolean, optional
-    uncertainty_sampling : {LHS, MC, FF, PFF, SOBOL, MORRIS, FAST}, optional
-    lever_sampling : {LHS, MC, FF, PFF, SOBOL, MORRIS, FAST}, optional TODO:: update doc
+    uncertainty_sampling : {LHS, MC, FF, SOBOL, MORRIS, FAST}, optional
+    uncertainty_sampling_kwargs : dict, optional
+    lever_sampling : {LHS, MC, FF, SOBOL, MORRIS, FAST}, optional TODO:: update doc
+    lever_sampling_kwargs : dict, optional
     callback  : Callback instance, optional
     return_callback : boolean, optional
     log_progress : bool, optional
-    combine : {'factorial', 'zipover'}, optional
+    combine : {'factorial', 'sample'}, optional
               how to combine uncertainties and levers?
               In case of 'factorial', both are sampled separately using their
               respective samplers. Next the resulting designs are combined in a
               full factorial manner.
-              In case of 'zipover', both are sampled separately and
+              In case of 'sample', both are sampled separately and
               then combined by cycling over the shortest of the the two sets
               of designs until the longest set of designs is exhausted.
 
@@ -352,42 +415,71 @@ def perform_experiments(
 
     """
     # TODO:: break up in to helper functions
-    # unreadable in this form
+    #        unreadable in this form
 
     if not scenarios and not policies:
-        raise EMAError("no experiments possible since both " "scenarios and policies are 0")
+        raise EMAError(
+            "no experiments possible since both scenarios and policies are 0"
+        )
 
-    scenarios, uncertainties, n_scenarios = setup_scenarios(
-        scenarios, uncertainty_sampling, uncertainty_union, models
+    scenarios, uncertainties, n_scenarios = _setup(
+        scenarios,
+        uncertainty_sampling,
+        uncertainty_sampling_kwargs,
+        models,
+        parameter_type="uncertainties",
+        union=uncertainty_union,
     )
-    policies, levers, n_policies = setup_policies(policies, lever_sampling, lever_union, models)
+    policies, levers, n_policies = _setup(
+        policies,
+        lever_sampling,
+        lever_sampling_kwargs,
+        models,
+        union=lever_union,
+        parameter_type="levers",
+    )
 
     try:
         n_models = len(models)
     except TypeError:
         n_models = 1
+        models = [
+            models,
+        ]
 
     outcomes = determine_objects(models, "outcomes", union=outcome_union)
 
-    if combine == "factorial":
-        nr_of_exp = n_models * n_scenarios * n_policies
+    nr_of_exp = -1
+    match combine:
+        case "full_factorial":
+            nr_of_exp = n_models * n_scenarios * n_policies
 
-        # TODO:: change to 0 policies / 0 scenarios is sampling set to 0 for
-        # it
-        _logger.info(
-            ("performing {} scenarios * {} policies * {} model(s) = " "{} experiments").format(
-                n_scenarios, n_policies, n_models, nr_of_exp
+            # TODO:: change to 0 policies / 0 scenarios is sampling set to 0 for
+            # it
+            _logger.info(
+                f"performing {n_scenarios} scenarios * {n_policies} policies * {n_models} model(s) = "
+                f"{nr_of_exp} experiments"
             )
-        )
-    else:
-        nr_of_exp = n_models * max(n_scenarios, n_policies)
-        # TODO:: change to 0 policies / 0 scenarios is sampling set to 0 for
-        # it
-        _logger.info(
-            ("performing max({} scenarios, {} policies) * {} model(s) = " "{} experiments").format(
-                n_scenarios, n_policies, n_models, nr_of_exp
+        case "sample":
+            nr_of_exp = n_models * max(n_scenarios, n_policies)
+            # TODO:: change to 0 policies / 0 scenarios is sampling set to 0 for
+            # it
+            _logger.info(
+                f"performing max({n_scenarios} scenarios, {n_policies} policies) * {n_models} model(s) = "
+                f"{nr_of_exp} experiments"
             )
-        )
+        case "cycle":
+            nr_of_exp = n_models * max(n_scenarios, n_policies)
+            # TODO:: change to 0 policies / 0 scenarios is sampling set to 0 for
+            # it
+            _logger.info(
+                f"performing max({n_scenarios} scenarios, {n_policies} policies) * {n_models} model(s) = "
+                f"{nr_of_exp} experiments"
+            )
+        case _:
+            raise ValueError(
+                f'unknown value for combine, got {combine}, should be one of "sample" or "factorial"'
+            )
 
     callback = setup_callback(
         callback,
@@ -403,7 +495,9 @@ def perform_experiments(
     if not evaluator:
         evaluator = SequentialEvaluator(models)
 
-    evaluator.evaluate_experiments(scenarios, policies, callback, combine=combine, **kwargs)
+    experiments = experiment_generator(models, scenarios, policies, combine=combine)
+
+    evaluator.evaluate_experiments(experiments, callback, **kwargs)
 
     if callback.i != nr_of_exp:
         raise EMAError(
@@ -452,90 +546,132 @@ def setup_callback(
     return callback
 
 
-def setup_policies(policies, levers_sampling, lever_union, models):
-    if not policies:
-        policies = [Policy("None", **{})]
-        levers = []
-        n_policies = 1
-    elif isinstance(policies, numbers.Integral):
-        sampler = levers_sampling
-
-        if not isinstance(sampler, AbstractSampler):
-            sampler = sampler.value
-
-        policies = sample_levers(models, policies, union=lever_union, sampler=sampler)
-        levers = policies.parameters
-        n_policies = policies.n
-    else:
-        try:
-            levers = policies.parameters
-            n_policies = policies.n
-        except AttributeError:
-            levers = determine_objects(models, "levers", union=True)
-            if isinstance(policies, Policy):
-                policies = [policies]
-
-            levers = [l for l in levers if l.name in policies[0]]
-            n_policies = len(policies)
-    return policies, levers, n_policies
-
-
-def setup_scenarios(scenarios, uncertainty_sampling, uncertainty_union, models):
-    if not scenarios:
-        scenarios = [Scenario("None", **{})]
-        uncertainties = []
-        n_scenarios = 1
-    elif isinstance(scenarios, numbers.Integral):
-        sampler = uncertainty_sampling
-        if not isinstance(sampler, AbstractSampler):
-            sampler = sampler.value
-        scenarios = sample_uncertainties(
-            models, scenarios, sampler=sampler, union=uncertainty_union
-        )
-        uncertainties = scenarios.parameters
-        n_scenarios = scenarios.n
-    else:
-        try:
-            uncertainties = scenarios.parameters
-            n_scenarios = scenarios.n
-        except AttributeError:
-            uncertainties = determine_objects(models, "uncertainties", union=True)
-            if isinstance(scenarios, Scenario):
-                scenarios = [scenarios]
-
-            uncertainties = [u for u in uncertainties if u.name in scenarios[0]]
-            n_scenarios = len(scenarios)
-    return scenarios, uncertainties, n_scenarios
-
-
-def optimize(
-    models,
-    algorithm=EpsNSGAII,
-    nfe=10000,
-    searchover="levers",
-    evaluator=None,
-    reference=None,
-    convergence=None,
-    constraints=None,
-    convergence_freq=1000,
-    logging_freq=5,
-    variator=None,
-    **kwargs,
-):
-    """optimize the model
+def _setup(
+    samples: int | Iterable[Sample] | Sample | SampleCollection | None,
+    sampler: AbstractSampler | SamplerTypes | None,
+    sampler_kwargs: dict | None,
+    models: Iterable[AbstractModel],
+    union: bool = True,
+    parameter_type: Literal["uncertainties", "levers"] = "uncertainties",
+) -> tuple[Iterable[Sample], list[Parameter], int]:
+    """Helper function.
 
     Parameters
     ----------
-    models : 1 or more Model instances
+    samples : int | Iterable[Sample] | Sample | SampleCollection | None
+    sampler: AbstractSampler | SamplerTypes| None
+             sampler to use, only relevant if samples is an int
+    sampler_kwargs: dict
+                    kwargs for sampler, only relevant if sampler is not None
+    models : Iterable[AbstractModel]
+             models to consider
+    union: bool
+            only relevant if len(model)s > 1, how to handle the parameters across multiple models
+            if true, use union, if false use intersection.
+    parameter_type: Literal["uncertainties", "levers"]
+            which parameters to consider on models.
+
+    """
+    # todo fix sampler type hints by adding Literal[all fields of sampler enum].
+
+    if sampler_kwargs is None:
+        sampler_kwargs = {}
+
+    if not samples:
+        samples = [Sample("None")]
+        parameters = []
+        n_samples = 1
+    elif isinstance(samples, numbers.Integral):
+        if not isinstance(sampler, AbstractSampler):
+            sampler = sampler.value
+        parameters = determine_objects(models, parameter_type, union=union)
+        samples = sampler.generate_samples(parameters, samples, **sampler_kwargs)
+        parameters = samples.parameters
+        n_samples = len(samples)
+    else:
+        try:
+            parameters = samples.parameters
+            n_samples = len(samples)
+        except AttributeError:
+            parameters = determine_objects(models, parameter_type, union=True)
+            if isinstance(samples, Sample):
+                samples = [samples]
+
+            parameters = [p for p in parameters if p.name in samples[0]]
+            n_samples = len(samples)
+    return samples, parameters, n_samples
+
+
+@overload
+def optimize(
+    model: AbstractModel,
+    algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+    nfe: int = 10000,
+    searchover: str = "levers",
+    evaluator: BaseEvaluator | None = None,
+    reference: Sample | None = None,
+    constraints: Iterable[Constraint] | None = None,
+    convergence_freq: int = 1000,
+    logging_freq: int = 5,
+    variator: Variator = None,
+    rng: Iterable[StdlibSeedLike] | None = None,
+    initial_population: Iterable[Sample] | None = None,
+    filename: str | None = None,
+    directory: str | None = None,
+    **kwargs,
+) -> list[tuple[pd.DataFrame, pd.DataFrame]]: ...
+
+
+@overload
+def optimize(
+    model: AbstractModel,
+    algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+    nfe: int = 10000,
+    searchover: str = "levers",
+    evaluator: BaseEvaluator | None = None,
+    reference: Sample | None = None,
+    constraints: Iterable[Constraint] | None = None,
+    convergence_freq: int = 1000,
+    logging_freq: int = 5,
+    variator: Variator = None,
+    rng: StdlibSeedLike | None = None,
+    initial_population: Iterable[Sample] | None = None,
+    filename: str | None = None,
+    directory: str | None = None,
+    **kwargs,
+) -> tuple[pd.DataFrame, pd.DataFrame]: ...
+
+
+def optimize(
+    model: AbstractModel,
+    algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+    nfe: int = 10000,
+    searchover: Literal["levers", "uncertainties"] = "levers",
+    evaluator: BaseEvaluator | None = None,
+    reference: Sample | None = None,
+    constraints: Iterable[Constraint] | None = None,
+    convergence_freq: int = 1000,
+    logging_freq: int = 5,
+    variator: Variator = None,
+    rng: StdlibSeedLike | Iterable[StdlibSeedLike] | None = None,
+    initial_population: Iterable[Sample] | None = None,
+    filename: str | None = None,
+    directory: str | None = None,
+    **kwargs,
+):
+    """Optimize the model.
+
+    Parameters
+    ----------
+    model : 1 or more Model instances
     algorithm : a valid Platypus optimization algorithm
     nfe : int
     searchover : {'uncertainties', 'levers'}
     evaluator : evaluator instance
-    reference : Policy or Scenario instance, optional
+    reference : Sample instance, optional
                 overwrite the default scenario in case of searching over
                 levers, or default policy in case of searching over
                 uncertainties
-    convergence : function or collection of functions, optional
     constraints : list, optional
     convergence_freq :  int
                         nfe between convergence check
@@ -544,78 +680,145 @@ def optimize(
     variator : platypus GAOperator instance, optional
                if None, it falls back on the defaults in platypus-opts
                which is SBX with PM
+    rng : seed for initializing the global python random number generator as used by platypus-opt
+          because platypus-opt uses the global random number generator, full reproducibility cannot
+          be guaranteed in case of threading.
+          If seed is an iterable, the optimization is run for each seed. The seed is added to the filename
+          to ensure separate tarballs for each run of the optimization.
+    initial_population : A collection of samples with which to initialize the optimization algorithm
+    filename : filename for storing intermediate archives/results
+               Every convergence_freq, the archive or results at that moment are added to this file.
+               The file itself will be a tarball.
+    directory : directory in which to store tarball of intermediate archives/results.
     kwargs : any additional arguments will be passed on to algorithm
 
     Returns
     -------
-    pandas DataFrame
+    pandas DataFrame with pareto front
+    pandas DataFrame with runtime convergence information
 
     Raises
     ------
-    EMAError if searchover is not one of 'uncertainties' or 'levers'
-    NotImplementedError if len(models) > 1
+    ValueError if searchover is not one of 'uncertainties' or 'levers'
 
     """
     if searchover not in ("levers", "uncertainties"):
-        raise EMAError(f"Searchover should be one of 'levers' or 'uncertainties', not {searchover}")
+        raise ValueError(
+            f"Searchover should be one of 'levers' or 'uncertainties', not {searchover}"
+        )
 
-    try:
-        if len(models) == 1:
-            models = models[0]
-        else:
-            raise NotImplementedError("Optimization over multiple models is not yet supported")
-    except TypeError:
-        pass
-
-    problem = to_problem(models, searchover, constraints=constraints, reference=reference)
+    decision_variables = model.levers if searchover == "levers" else model.uncertainties
+    objectives = [obj for obj in model.outcomes if obj.kind != obj.INFO]
+    problem = Problem(
+        searchover, decision_variables, objectives, constraints, reference=reference
+    )
 
     # solve the optimization problem
-    if not evaluator:
-        evaluator = SequentialEvaluator(models)
+    if evaluator is None:
+        evaluator = SequentialEvaluator(model)
 
-    return _optimize(
-        problem,
-        evaluator,
-        algorithm,
-        convergence,
-        nfe,
-        convergence_freq,
-        logging_freq,
-        variator=variator,
-        **kwargs,
-    )
+    if isinstance(rng, Iterable):
+        all_results = []
+        for entry in rng:
+            new_filename = f"{entry}_{filename}"
+
+            result = _optimize(
+                problem,
+                evaluator,
+                algorithm,
+                nfe,
+                convergence_freq,
+                logging_freq,
+                variator=variator,
+                initial_population=initial_population,
+                filename=new_filename,
+                directory=directory,
+                rng=entry,
+                **kwargs,
+            )
+            all_results.append(result)
+        return all_results
+    else:
+        return _optimize(
+            problem,
+            evaluator,
+            algorithm,
+            nfe,
+            convergence_freq,
+            logging_freq,
+            variator=variator,
+            filename=filename,
+            directory=directory,
+            initial_population=initial_population,
+            rng=rng,
+            **kwargs,
+        )
+
+
+@overload
+def robust_optimize(
+    model: AbstractModel,
+    robustness_functions: list[ScalarOutcome],
+    scenarios: int | Iterable[Sample],
+    algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+    nfe: int = 10000,
+    evaluator: BaseEvaluator | None = None,
+    constraints: Iterable[Constraint] | None = None,
+    convergence_freq: int = 1000,
+    logging_freq: int = 5,
+    variator: Variator = None,
+    rng: StdlibSeedLike | None = None,
+    initial_population: Iterable[Sample] | None = None,
+    filename: str | None = None,
+    directory: str | None = None,
+    **kwargs,
+) -> tuple[pd.DataFrame, pd.DataFrame]: ...
+
+
+@overload
+def robust_optimize(
+    model: AbstractModel,
+    robustness_functions: list[ScalarOutcome],
+    scenarios: int | Iterable[Sample],
+    algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+    nfe: int = 10000,
+    evaluator: BaseEvaluator | None = None,
+    constraints: Iterable[Constraint] | None = None,
+    convergence_freq: int = 1000,
+    logging_freq: int = 5,
+    variator: Variator = None,
+    rng: Iterable[StdlibSeedLike] | None = None,
+    initial_population: Iterable[Sample] | None = None,
+    filename: str | None = None,
+    directory: str | None = None,
+    **kwargs,
+) -> tuple[pd.DataFrame, pd.DataFrame]: ...
 
 
 def robust_optimize(
-    model,
-    robustness_functions,
-    scenarios,
-    evaluator=None,
-    algorithm=EpsNSGAII,
-    nfe=10000,
-    convergence=None,
-    constraints=None,
-    convergence_freq=1000,
-    logging_freq=5,
+    model: AbstractModel,
+    robustness_functions: list[ScalarOutcome],
+    scenarios: int | Iterable[Sample],
+    algorithm: type[AbstractGeneticAlgorithm] = EpsNSGAII,
+    nfe: int = 10000,
+    evaluator: BaseEvaluator | None = None,
+    constraints: Iterable[Constraint] | None = None,
+    convergence_freq: int = 1000,
+    logging_freq: int = 5,
+    variator: Variator = None,
+    rng: StdlibSeedLike | Iterable[StdlibSeedLike] | None = None,
+    initial_population: Iterable[Sample] | None = None,
+    filename: str | None = None,
+    directory: str | None = None,
     **kwargs,
 ):
-    """perform robust optimization
+    """Perform robust optimization.
 
     Parameters
     ----------
     model : model instance
     robustness_functions : collection of ScalarOutcomes
     scenarios : int, or collection
-    evaluator : Evaluator instance
-    algorithm : platypus Algorithm instance
-    nfe : int
-    convergence : list
-                  list of convergence metrics
-    constraints : list
-    convergence_freq :  int
-                        nfe between convergence check
-    logging_freq : int
-                   number of generations between logging of progress
     kwargs : any additional arguments will be passed on to algorithm
 
     Raises
@@ -630,24 +833,50 @@ def robust_optimize(
     """
     for rf in robustness_functions:
         assert isinstance(rf, ScalarOutcome)
-        assert rf.kind != AbstractOutcome.INFO
+        assert rf.kind != Outcome.INFO
         assert rf.function is not None
 
-    problem = to_robust_problem(
-        model, scenarios, constraints=constraints, robustness_functions=robustness_functions
+    problem = Problem(
+        "robust", model.levers, robustness_functions, constraints, reference=scenarios
     )
 
-    # solve the optimization problem
-    if not evaluator:
+    if evaluator is None:
         evaluator = SequentialEvaluator(model)
 
-    return _optimize(
-        problem,
-        evaluator,
-        algorithm,
-        convergence,
-        int(nfe),
-        convergence_freq,
-        logging_freq,
-        **kwargs,
-    )
+    # solve the optimization problem
+    if isinstance(rng, Iterable):
+        all_results = []
+        for entry in rng:
+            new_filename = f"{entry}_{filename}"
+
+            result = _optimize(
+                problem,
+                evaluator,
+                algorithm,
+                nfe,
+                convergence_freq,
+                logging_freq,
+                variator=variator,
+                initial_population=initial_population,
+                filename=new_filename,
+                directory=directory,
+                rng=entry,
+                **kwargs,
+            )
+            all_results.append(result)
+        return all_results
+    else:
+        return _optimize(
+            problem,
+            evaluator,
+            algorithm,
+            nfe,
+            convergence_freq,
+            logging_freq,
+            variator=variator,
+            filename=filename,
+            directory=directory,
+            initial_population=initial_population,
+            rng=rng,
+            **kwargs,
+        )

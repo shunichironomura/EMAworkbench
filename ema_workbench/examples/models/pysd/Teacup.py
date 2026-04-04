@@ -1,13 +1,10 @@
-"""
-Python model 'Teacup.py'
-Translated using PySD
-"""
+"""Python model 'Teacup.py' Translated using PySD."""
 
 from pathlib import Path
-import numpy as np
 
-from pysd.py_backend.statefuls import Integ
+import numpy as np
 from pysd import Component
+from pysd.py_backend.statefuls import Integ
 
 __pysd_version__ = "3.12.0"
 
@@ -26,7 +23,7 @@ _control_vars = {
     "initial_time": lambda: 0,
     "final_time": lambda: 30,
     "time_step": lambda: 0.125,
-    "saveper": lambda: time_step(),
+    "saveper": lambda: time_step(),  # noqa: PLW0108
 }
 
 
@@ -37,25 +34,23 @@ def _init_outer_references(data):
 
 @component.add(name="Time")
 def time():
-    """
-    Current time of the model.
-    """
+    """Current time of the model."""
     return __data["time"]()
 
 
-@component.add(name="FINAL TIME", units="Minute", comp_type="Constant", comp_subtype="Normal")
+@component.add(
+    name="FINAL TIME", units="Minute", comp_type="Constant", comp_subtype="Normal"
+)
 def final_time():
-    """
-    The final time for the simulation.
-    """
+    """The final time for the simulation."""
     return __data["time"].final_time()
 
 
-@component.add(name="INITIAL TIME", units="Minute", comp_type="Constant", comp_subtype="Normal")
+@component.add(
+    name="INITIAL TIME", units="Minute", comp_type="Constant", comp_subtype="Normal"
+)
 def initial_time():
-    """
-    The initial time for the simulation.
-    """
+    """The initial time for the simulation."""
     return __data["time"].initial_time()
 
 
@@ -68,9 +63,7 @@ def initial_time():
     depends_on={"time_step": 1},
 )
 def saveper():
-    """
-    The frequency with which output is stored.
-    """
+    """The frequency with which output is stored."""
     return __data["time"].saveper()
 
 
@@ -82,9 +75,7 @@ def saveper():
     comp_subtype="Normal",
 )
 def time_step():
-    """
-    The time step for the simulation.
-    """
+    """The time step for the simulation."""
     return __data["time"].time_step()
 
 
@@ -100,6 +91,7 @@ def time_step():
     comp_subtype="Normal",
 )
 def characteristic_time():
+    """Characteristic time for the simulation."""
     return 10
 
 
@@ -115,14 +107,13 @@ def characteristic_time():
     },
 )
 def heat_loss_to_room():
-    """
-    This is the rate at which heat flows from the cup into the room. We can ignore it at this point.
-    """
+    """The rate at which heat flows from the cup into the room. We can ignore it at this point."""
     return (teacup_temperature() - room_temperature()) / characteristic_time()
 
 
 @component.add(name="Room Temperature", comp_type="Constant", comp_subtype="Normal")
 def room_temperature():
+    """Room temperature."""
     return 70
 
 
@@ -132,9 +123,12 @@ def room_temperature():
     comp_type="Stateful",
     comp_subtype="Integ",
     depends_on={"_integ_teacup_temperature": 1},
-    other_deps={"_integ_teacup_temperature": {"initial": {}, "step": {"heat_loss_to_room": 1}}},
+    other_deps={
+        "_integ_teacup_temperature": {"initial": {}, "step": {"heat_loss_to_room": 1}}
+    },
 )
 def teacup_temperature():
+    """Teacup temperature."""
     return _integ_teacup_temperature()
 
 

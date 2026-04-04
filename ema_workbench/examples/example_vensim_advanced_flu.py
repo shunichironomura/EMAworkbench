@@ -1,29 +1,30 @@
-"""
-Created on 20 May, 2011
+"""A more advanced illustration of using the workbench with vensim.
 
-This module shows how you can use vensim models directly
-instead of coding the model in Python. The underlying case
-is the same as used in fluExample
+The underlying case is the same as used in example_flu.py
 
-.. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
-                epruyt <e.pruyt (at) tudelft (dot) nl>
 """
 
 import numpy as np
 
 from ema_workbench import (
-    TimeSeriesOutcome,
-    ScalarOutcome,
-    ema_logging,
-    Policy,
     MultiprocessingEvaluator,
+    Sample,
+    ScalarOutcome,
+    TimeSeriesOutcome,
+    ema_logging,
     save_results,
 )
 from ema_workbench.connectors.vensim import VensimModel
 from ema_workbench.em_framework.parameters import parameters_from_csv
 
+# Created on 20 May, 2011
+#
+# .. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
+#                 epruyt <e.pruyt (at) tudelft (dot) nl>
+
 
 def time_of_max(infected_fraction, time):
+    """Returns the time of the maximum infected fraction."""
     index = np.where(infected_fraction == np.max(infected_fraction))
     timing = time[index][0]
     return timing
@@ -32,7 +33,7 @@ def time_of_max(infected_fraction, time):
 if __name__ == "__main__":
     ema_logging.log_to_stderr(ema_logging.INFO)
 
-    model = VensimModel("fluCase", wd="./models/flu", model_file="FLUvensimV1basecase.vpm")
+    model = VensimModel("flu", wd="./models/flu", model_file="FLUvensimV1basecase.vpm")
 
     # outcomes
     model.outcomes = [
@@ -41,10 +42,14 @@ if __name__ == "__main__":
         ),
         TimeSeriesOutcome("infected_fraction_R1", variable_name="infected fraction R1"),
         ScalarOutcome(
-            "max_infection_fraction", variable_name="infected fraction R1", function=np.max
+            "max_infection_fraction",
+            variable_name="infected fraction R1",
+            function=np.max,
         ),
         ScalarOutcome(
-            "time_of_max", variable_name=["infected fraction R1", "TIME"], function=time_of_max
+            "time_of_max",
+            variable_name=["infected fraction R1", "TIME"],
+            function=time_of_max,
         ),
     ]
 
@@ -54,9 +59,9 @@ if __name__ == "__main__":
 
     # add policies
     policies = [
-        Policy("no policy", model_file="FLUvensimV1basecase.vpm"),
-        Policy("static policy", model_file="FLUvensimV1static.vpm"),
-        Policy("adaptive policy", model_file="FLUvensimV1dynamic.vpm"),
+        Sample("no policy", model_file="FLUvensimV1basecase.vpm"),
+        Sample("static policy", model_file="FLUvensimV1static.vpm"),
+        Sample("adaptive policy", model_file="FLUvensimV1dynamic.vpm"),
     ]
 
     with MultiprocessingEvaluator(model, n_processes=-1) as evaluator:

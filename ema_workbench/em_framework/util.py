@@ -1,57 +1,74 @@
-"""utilities used throughout em_framework"""
-
-import copy
-import itertools
-from collections import OrderedDict, UserDict
-
-import tqdm
-
-from ..util import EMAError
-
-# from .parameters import Parameter
+"""utilities used throughout em_framework."""
 
 # Created on Jul 16, 2016
 #
 # .. codeauthor::jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
+import copy
+import itertools
+import warnings
+from collections.abc import (
+    Iterable,
+    Iterator,
+    KeysView,
+    Mapping,
+    MutableMapping,
+    Sequence,
+)
+from typing import Literal
+
+import numpy as np
+import tqdm
+
+from ..util import EMAError
+
+type NumpySeedLike = int | np.integer | Sequence[int] | np.random.SeedSequence
+type RNGLike = np.random.Generator | np.random.BitGenerator
+type StdlibSeedLike = int | float | str | bytes | bytearray
 
 __all__ = [
-    "NamedObject",
-    "NamedDict",
     "Counter",
-    "representation",
-    "ProgressTrackingMixIn",
-    "combine",
-    "NamedObjectMapDescriptor",
+    "NamedDict",
+    "NamedObject",
     "NamedObjectMap",
+    "NamedObjectMapDescriptor",
+    "NumpySeedLike",
+    "ProgressTrackingMixIn",
+    "RNGLike",
+    "StdlibSeedLike",
+    "Variable",
+    "combine",
     "determine_objects",
+    "representation",
 ]
 
-
 class NamedObject:
-    def __init__(self, name):
-        self.name = name
+    """Base object with a name attribute."""
+
+    def __init__(self, name: str, **kwargs):
+        super().__init__(**kwargs)
+        self.name: str = name
 
 
 class Counter:
-    """helper function for generating counter based names for NamedDicts"""
+    """helper function for generating counter based names for NamedDicts."""
 
     def __init__(self, startfrom=0):
         self._counter = itertools.count(startfrom)
 
-    def __call__(self, *args):
+    def __call__(self, *args):  # noqa: D102
         return next(self._counter)
 
 
 def representation(named_dict):
-    """helper function for generating repr based names for NamedDicts"""
+    """Helper function for generating repr based names for NamedDicts."""
     return repr(named_dict)
 
 
 class Variable(NamedObject):
-    """Root class for input parameters and outcomes"""
+    """Root class for input parameters and outcomes."""
 
     @property
-    def variable_name(self):
+    def variable_name(self):  # noqa: D102
         if self._variable_name is None:
             return [self.name]
         else:
@@ -63,97 +80,127 @@ class Variable(NamedObject):
             name = [name]
         self._variable_name = name
 
-    def __init__(self, name):
+    @property
+    def name(self):  # noqa: D102
+        return self._name
+
+    @name.setter
+    def name(self, name):
         if not name.isidentifier():
-            DeprecationWarning(
-                f"'{name}' is not a valid Python identifier. Starting from version 3.0 of the EMAworkbench, names must be valid python identifiers"
+            warnings.warn(
+                f"'{name}' is not a valid Python identifier. Starting from version 3.0 of the EMAworkbench, names must be valid python identifiers",
+                DeprecationWarning,
+                stacklevel=2,
             )
+            # raise DeprecationWarning(
+
+            # )
+        self._name = name
+
+    def __init__(self, name: str, variable_name: str | list[str] | None = None):
         super().__init__(name)
+        self.variable_name = variable_name
 
 
-class NamedObjectMap:
-    def __init__(self, kind):  # @ReservedAssignment
+class NamedObjectMap[T](MutableMapping):
+    """A named object mapping class."""
+
+    def __init__(self, kind: type[T]) -> None:
         super().__init__()
-        self.kind = kind
-        self._data = OrderedDict()
+        self.kind: type[T] = kind
+        self._data: dict[str, T] = {}
 
         if not issubclass(kind, NamedObject):
-            raise TypeError(f"Type must be a (subclass of a) NamedObject, not {type(kind)}")
+            raise TypeError(
+                f"Type must be a (subclass of a) NamedObject, not {type(kind)}"
+            )
 
-    def clear(self):
-        self._data = OrderedDict()
+    def clear(self):  # noqa: D102
+        self._data = {}
 
-    def copy(self):
-        copy = NamedObjectMap(self.kind)
+    def copy(self):  # noqa: D102
+        copy = self.__class__(self.kind)
         copy._data = self._data.copy()
 
         return copy
 
-    def __len__(self):
+    def __len__(self) -> int:  # noqa: D105
         return len(self._data)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str | int) -> T:  # noqa: D105
         if isinstance(key, int):
-            for i, (_, v) in enumerate(self._data.items()):
-                if i == key:
-                    return v
-            raise KeyError(key)
-        else:
-            return self._data[key]
+            key = list(self._data.keys())[key]
 
-    def __setitem__(self, key, value):
+        return self._data[key]
+
+    def __setitem__(self, key: str | int, value: T) -> None:  # noqa: D105
         if not isinstance(value, self.kind):
-            raise TypeError(f"Can only add {self.kind.__name__} objects, not {type(value)}")
+            raise TypeError(
+                f"Can only add {self.kind.__name__} objects, not {type(value)}"
+            )
 
         if isinstance(key, int):
-            self._data = OrderedDict(
-                [
-                    (value.name, value) if i == key else (k, v)
+            if len(self._data) < key:
+                # we try to add out of bounds
+                raise IndexError("assignment index out of range")
+            if len(self._data) == key:
+                # we add it at the end
+                self._data[value] = value
+            else:
+                # we replace something
+                self._data = {
+                    value.name: value if i == key else (k, v)  # noqa: B035
                     for i, (k, v) in enumerate(self._data.items())
-                ]
-            )
+                }
         else:
             if value.name != key:
-                raise ValueError(f"Key ({key}) does not match name of {self.kind.__name__}")
+                raise KeyError(
+                    f"Key ({key}) does not match name of {self.kind.__name__}"
+                )
 
             self._data[key] = value
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: str | int) -> None:  # noqa: D105
+        if isinstance(key, int):
+            key = list(self._data.keys())[key]
+
         del self._data[key]
 
-    def __iter__(self):
+    def __iter__(self):  # noqa: D105
         return iter(self._data.values())
 
-    def __contains__(self, item):
+    def __contains__(self, item):  # noqa: D105
         return item in self._data
 
-    def extend(self, value):
+    def extend(self, value: T | Iterable[T]):  # noqa: D102
         if isinstance(value, NamedObject):
             self._data[value.name] = value
         elif hasattr(value, "__iter__"):
             for item in value:
                 self._data[item.name] = item
         else:
-            raise TypeError(f"Can only add {str(type)} objects")
+            raise TypeError(f"Can only add {self.kind.__name__} objects")
 
-    def __add__(self, value):
+    def __add__(self, value: T | Iterable[T]):  # noqa: D105
         data = self.copy()
         data.extend(value)
         return data
 
-    def __iadd__(self, value):
+    def __iadd__(self, value: T | Iterable[T]):  # noqa: D105
         self.extend(value)
         return self
 
-    def keys(self):
+    def keys(self) -> KeysView[str]:  # noqa: D102
         return self._data.keys()
 
 
 class NamedObjectMapDescriptor:
+    """Descriptor class for named objects."""
+
     def __init__(self, kind):
         self.kind = kind
 
-    def __get__(self, instance, owner):
+    def __get__(self, instance, owner):  # noqa: D105
         if instance is None:
             return self
         try:
@@ -163,7 +210,7 @@ class NamedObjectMapDescriptor:
             setattr(instance, self.internal_name, mapping)
             return mapping
 
-    def __set__(self, instance, values):
+    def __set__(self, instance, values):  # noqa: D105
         try:
             mapping = getattr(instance, self.internal_name)  # @ReservedAssignment
         except AttributeError:
@@ -172,23 +219,59 @@ class NamedObjectMapDescriptor:
 
         mapping.extend(values)
 
-    def __set_name__(self, owner, name):
+    def __set_name__(self, owner, name):  # noqa: D105
         self.name = name
         self.internal_name = "_" + name
 
 
-class NamedDict(UserDict, NamedObject):
+class NamedDict(MutableMapping, NamedObject):
+    """Named dictionary class."""
+
     def __init__(self, name=representation, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(name)
+        self.data = {**kwargs}
         if name is None:
             raise ValueError()
         elif callable(name):
             name = name(self)
         self.name = name
 
+    def copy(self):
+        """Return a shallow copy of this object."""
+        return copy.copy(self)
 
-def combine(*args):
-    """combine scenario and policy into a single experiment dict
+    def __getitem__(self, key):  # noqa: D105
+        return self.data[key]
+
+    def __setitem__(self, key, value):  # noqa: D105
+        self.data[key] = value
+
+    def __delitem__(self, key):  # noqa: D105
+        del self.data[key]
+
+    def __iter__(self) -> Iterator:  # noqa: D105
+        return iter(self.data)
+
+    def __len__(self) -> int:  # noqa: D105
+        return len(self.data)
+
+    def __or__(self, other):  # noqa: D105
+        if not isinstance(other, Mapping | dict):
+            raise NotImplementedError
+        new = self.copy()
+        new.update(other)
+        return new
+
+    def __ior__(self, other):  # noqa: D105
+        self.update(other)
+        return self
+
+    def __repr__(self):  # noqa: D105
+        return repr(self.data)
+
+
+def combine(*args) -> dict:
+    """Combine scenario and policy into a single experiment dict.
 
     Parameters
     ----------
@@ -216,8 +299,10 @@ def combine(*args):
     return experiment
 
 
-def determine_objects(models, attribute, union=True):
-    """determine the parameters over which to sample
+def determine_objects(
+    models, attribute: Literal["uncertainties", "levers", "outcomes"], union=True
+):
+    """Determine the parameters over which to sample.
 
     Parameters
     ----------
@@ -259,7 +344,7 @@ def determine_objects(models, attribute, union=True):
 
 
 class ProgressTrackingMixIn:
-    """Mixin for monitoring progress
+    """Mixin for monitoring progress.
 
     Parameters
     ----------
@@ -287,12 +372,13 @@ class ProgressTrackingMixIn:
 
     def __init__(
         self,
-        N,
+        N,  # noqa: N803
         reporting_interval,
         logger,
         log_progress=False,
         log_func=lambda self: self._logger.info(f"{self.i} experiments completed"),
     ):
+        """Init."""
         # TODO:: how to enable variable log messages which might include
         # different attributes?
 
@@ -305,7 +391,7 @@ class ProgressTrackingMixIn:
         if not log_progress:
             self.pbar = tqdm.tqdm(total=N, ncols=79)
 
-    def __call__(self, n):
+    def __call__(self, n):  # noqa: D102
         self.i += n
         self._logger.debug(f"{self.i} experiments performed")
 
@@ -318,7 +404,7 @@ class ProgressTrackingMixIn:
             if self.i % self.reporting_interval == 0:
                 self.log_func(self)
 
-    def close(self):
+    def close(self):  # noqa: D102
         try:
             self.pbar.__exit__(None, None, None)
         except AttributeError:

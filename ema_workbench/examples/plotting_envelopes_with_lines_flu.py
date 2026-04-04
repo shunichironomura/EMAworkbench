@@ -1,14 +1,14 @@
-"""
-Created on Jul 8, 2014
+"""Basic example of envelope with lines plot based on Flu model."""
 
-@author: jhkwakkel@tudelft.net
-"""
+# Created on Jul 8, 2014
+#
+# @author: jhkwakkel@tudelft.net
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from ema_workbench import ema_logging, load_results
-from ema_workbench.analysis import lines, Density
+from ema_workbench.analysis import Density, lines
 
 ema_logging.log_to_stderr(ema_logging.INFO)
 

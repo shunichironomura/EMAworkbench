@@ -1,13 +1,10 @@
-"""
-
-This module provides various convenience functions and classes.
-
-"""
+"""Convenience functions and classes used throughout the package."""
 
 import configparser
 import json
 import os
 import tarfile
+from collections.abc import Callable
 from io import BytesIO
 
 import numpy as np
@@ -15,19 +12,18 @@ import pandas as pd
 
 from . import EMAError, get_module_logger
 
-
 # Created on 13 jan. 2011
 #
 # .. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
 
-__all__ = ["load_results", "save_results", "merge_results", "process_replications"]
+__all__ = ["load_results", "merge_results", "process_replications", "save_results"]
 _logger = get_module_logger(__name__)
 
 
-def load_results(file_name):
-    """
-    load the specified bz2 file. the file is assumed to be saves
-    using save_results.
+def load_results(file_name: str) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """Load the specified tar.gz file.
+
+    the file is assumed to be saves using save_results.
 
     Parameters
     ----------
@@ -39,7 +35,7 @@ def load_results(file_name):
     IOError if file not found
 
     """
-    from ..em_framework.outcomes import AbstractOutcome, register
+    from ..em_framework.outcomes import Outcome, register  # noqa: PLC0415
 
     file_name = os.path.abspath(file_name)
 
@@ -60,9 +56,9 @@ def load_results(file_name):
 
         for name, dtype in metadata["experiments"].items():
             try:
-                dtype = np.dtype(dtype)
+                dtype = np.dtype(dtype)  # noqa: PLW2901
             except TypeError:
-                dtype = pd.api.types.pandas_dtype(dtype)
+                dtype = pd.api.types.pandas_dtype(dtype)  # noqa: PLW2901
 
             if experiments[name].dtype is not dtype:
                 experiments[name] = experiments[name].astype(dtype)
@@ -73,10 +69,10 @@ def load_results(file_name):
         # load outcomes
         outcomes = {}
         known_outcome_classes = {
-            entry.__name__: entry for entry in AbstractOutcome.get_subclasses()
+            entry.__name__: entry for entry in Outcome.get_subclasses()
         }
         for outcome_type, name, filename in metadata["outcomes"]:
-            outcome = known_outcome_classes[outcome_type](name)
+            outcome = known_outcome_classes[outcome_type](name)  #  noqa F841
 
             values = register.deserialize(name, filename, archive)
             outcomes[name] = values
@@ -86,9 +82,9 @@ def load_results(file_name):
 
 
 def load_results_old(archive):
-    """
-    load the specified bz2 file. the file is assumed to be saves
-    using save_results.
+    """Load the specified bz2 file.
+
+    The file is assumed to be saves using save_results.
 
     Parameters
     ----------
@@ -99,7 +95,7 @@ def load_results_old(archive):
     IOError if file not found
 
     """
-    from ..em_framework.outcomes import ScalarOutcome, ArrayOutcome, register
+    from ..em_framework.outcomes import ArrayOutcome, ScalarOutcome  # noqa: PLC0415
 
     outcomes = {}
 
@@ -114,9 +110,9 @@ def load_results_old(archive):
     metadata = archive.extractfile("experiments metadata.csv").readlines()
 
     for entry in metadata:
-        entry = entry.decode("UTF-8")
-        entry = entry.strip()
-        entry = entry.split(",")
+        entry = entry.decode("UTF-8")  # noqa: PLW2901
+        entry = entry.strip()  # noqa: PLW2901
+        entry = entry.split(",")  # noqa: PLW2901
         name, dtype = (str(item) for item in entry)
 
         try:
@@ -136,7 +132,7 @@ def load_results_old(archive):
 
     # load outcomes
     for outcome, shape in metadata.items():
-        shape = list(shape)
+        shape = list(shape)  # noqa: PLW2901
         shape[0] = shape[0][1:]
         shape[-1] = shape[-1][0:-1]
 
@@ -147,7 +143,7 @@ def load_results_old(archive):
                     temp_shape.append(int(entry))
                 except ValueError:
                     temp_shape.append(int(entry[0:-1]))
-        shape = tuple(temp_shape)
+        shape = tuple(temp_shape)  # noqa: PLW2901
 
         if len(shape) > 2:
             nr_files = shape[-1]
@@ -168,19 +164,15 @@ def load_results_old(archive):
     # reformat outcomes from generic dict to new style OutcomesDict
     outcomes_new = {}
     for k, v in outcomes.items():
-        if v.ndim == 1:
-            outcome = ScalarOutcome(k)
-        else:
-            outcome = ArrayOutcome(k)
+        outcome = ScalarOutcome(k) if v.ndim == 1 else ArrayOutcome(k)
 
         outcomes_new[outcome.name] = v
 
     return experiments, outcomes_new
 
 
-def save_results(results, file_name):
-    """
-    save the results to the specified tar.gz file.
+def save_results(results: tuple[pd.DataFrame, dict[str, np.ndarray]], file_name: str) -> None:
+    """Save the results to the specified tar.gz file.
 
     The way in which results are stored depends. Experiments are saved
     as csv. Outcomes depend on the outcome type. Scalar, and <3D arrays are
@@ -198,9 +190,9 @@ def save_results(results, file_name):
     IOError if file not found
 
     """
-    from ..em_framework.outcomes import register
+    from ..em_framework.outcomes import register  # noqa: PLC0415
 
-    VERSION = 0.1
+    VERSION = 0.1  # noqa: N806
     file_name = os.path.abspath(file_name)
 
     def add_file(tararchive, stream, filename):
@@ -213,7 +205,9 @@ def save_results(results, file_name):
     with tarfile.open(file_name, "w:gz") as z:
         # store experiments
         stream = BytesIO()
-        stream.write(experiments.to_csv(header=True, encoding="UTF-8", index=False).encode())
+        stream.write(
+            experiments.to_csv(header=True, encoding="UTF-8", index=False).encode()
+        )
         add_file(z, stream, "experiments.csv")
 
         # store outcomes
@@ -238,10 +232,11 @@ def save_results(results, file_name):
     _logger.info(f"results saved successfully to {file_name}")
 
 
-def merge_results(results1, results2):
-    """
-    convenience function for merging the return from
-    :meth:`~modelEnsemble.ModelEnsemble.perform_experiments`.
+def merge_results(
+    results1: tuple[pd.DataFrame, dict[str, np.ndarray]],
+    results2: tuple[pd.DataFrame, dict[str, np.ndarray]],
+) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """Convenience function for merging results from the workbench.
 
     The function merges results2 with results1. For the experiments,
     it generates an empty array equal to the size of the sum of the
@@ -268,7 +263,6 @@ def merge_results(results1, results2):
 
 
     """
-
     # start of merging
     exp1, res1 = results1
     exp2, res2 = results2
@@ -295,7 +289,7 @@ def merge_results(results1, results2):
     return mr
 
 
-def get_ema_project_home_dir():
+def get_ema_project_home_dir() -> str:
     try:
         config_file_name = "expworkbench.cfg"
         directory = os.path.dirname(__file__)
@@ -315,10 +309,11 @@ def get_ema_project_home_dir():
         return os.getcwd()
 
 
-def process_replications(data, aggregation_func=np.mean):
-    """
-    Convenience function for processing the replications of a stochastic
-    model's outcomes.
+def process_replications(
+    data: dict[str, np.ndarray] | tuple[pd.DataFrame, dict[str, np.ndarray]],
+    aggregation_func: Callable[..., np.ndarray] = np.mean,
+) -> dict[str, np.ndarray] | tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """Convenience function for processing the replications of a stochastic model outcomes.
 
     The default behavior is to take the mean of the replications. This reduces
     the dimensionality of the outcomes from
@@ -343,20 +338,23 @@ def process_replications(data, aggregation_func=np.mean):
 
 
     """
-
     if isinstance(data, dict):
         # replications are the second dimension of the outcome arrays
-        outcomes_processed = {key: aggregation_func(data[key], axis=1) for key in data.keys()}
+        outcomes_processed = {key: aggregation_func(data[key], axis=1) for key in data}
         return outcomes_processed
     elif (
-        isinstance(data, tuple) and isinstance(data[0], pd.DataFrame) and isinstance(data[1], dict)
+        isinstance(data, tuple)
+        and isinstance(data[0], pd.DataFrame)
+        and isinstance(data[1], dict)
     ):
         experiments, outcomes = data  # split results
         outcomes_processed = {
-            key: aggregation_func(outcomes[key], axis=1) for key in outcomes.keys()
+            key: aggregation_func(outcomes[key], axis=1) for key in outcomes
         }
         results_processed = (experiments.copy(deep=True), outcomes_processed)
         return results_processed
 
     else:
-        raise EMAError(f"data should be a dict or tuple, but is a {type(data)}".format())
+        raise EMAError(
+            f"data should be a dict or tuple, but is a {type(data)}".format()
+        )

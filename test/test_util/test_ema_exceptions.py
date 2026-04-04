@@ -1,14 +1,12 @@
-"""
-Created on Jul 28, 2015
+"""Created on Jul 28, 2015
 
 .. codeauthor:: jhkwakkel <j.h.kwakkel (at) tudelft (dot) nl>
 """
 
-import unittest
 import sys
+import unittest
 
-
-from ema_workbench.util.ema_exceptions import EMAError, CaseError
+from ema_workbench.util.ema_exceptions import EMAError, ExperimentError
 
 
 class TestEMAError(unittest.TestCase):
@@ -19,15 +17,12 @@ class TestEMAError(unittest.TestCase):
 
         error = EMAError("a message", "another message")
 
-        if sys.version_info[0] < 3:
-            self.assertEqual(str(error), "(u'a message', u'another message')")
-        else:
-            self.assertEqual(str(error), "('a message', 'another message')")
+        self.assertEqual(str(error), "('a message', 'another message')")
 
 
 class TestCaseError(unittest.TestCase):
     def test_caseerror(self):
-        error = CaseError("a message", {"a": 1, "b": 2})
+        error = ExperimentError("a message", {"a": 1, "b": 2})
 
         self.assertEqual(str(error), "a message case: {a:1, b:2, policy:None}")
 
