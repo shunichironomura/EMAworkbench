@@ -282,8 +282,10 @@ def plot_pair_wise_scatter(
     box_init: pd.DataFrame,
     restricted_dims: list[str],
     diag: Literal["kde", "cdf", "regression"] | None = "kde",
-    upper: Literal["scatter", "hexbin", "hist", "contour"] | None = "scatter",
-    lower: Literal["scatter", "hexbin", "hist", "contour"] | None = "hist",
+    upper: Literal["scatter", "hexbin", "hist", "contour", "datashader"]
+    | None = "scatter",
+    lower: Literal["scatter", "hexbin", "hist", "contour", "datashader"]
+    | None = "hist",
     fill_subplots=True,
     legend=True,
 ) -> sns.PairGrid:
@@ -396,11 +398,57 @@ def plot_pair_wise_scatter(
                 func(sns.histplot)
             case "scatter":
                 func(sns.scatterplot)
+            case "datashader":
+                try:
+                    import datashader as ds  # noqa: PLC0415
+                    import datashader.transfer_functions as tf  # noqa: PLC0415
+                except ImportError as err:
+                    raise ImportError(
+                        "datashader is required for datashader scatter plots. "
+                        "Install it with: pip install datashader"
+                    ) from err
+
+                def datashader_scatter(x_col, y_col, *args, hue=None, **kwargs):
+                    ax = plt.gca()
+                    df_plot = pd.DataFrame(
+                        {
+                            "x": x_col.values,
+                            "y": y_col.values,
+                            "cat": pd.Categorical(data["y"].values),
+                        }
+                    )
+
+                    x_min, x_max = float(df_plot["x"].min()), float(df_plot["x"].max())
+                    y_min, y_max = float(df_plot["y"].min()), float(df_plot["y"].max())
+
+                    # Avoid zero-width ranges
+                    if x_min == x_max:
+                        x_min, x_max = x_min - 0.5, x_max + 0.5
+                    if y_min == y_max:
+                        y_min, y_max = y_min - 0.5, y_max + 0.5
+
+                    canvas = ds.Canvas(
+                        plot_width=200,
+                        plot_height=200,
+                        x_range=(x_min, x_max),
+                        y_range=(y_min, y_max),
+                    )
+                    agg = canvas.points(df_plot, "x", "y", agg=ds.count_cat("cat"))
+                    img = tf.shade(agg, how="log", min_alpha=40)
+
+                    ax.imshow(
+                        img.to_pil(),
+                        extent=[x_min, x_max, y_min, y_max],
+                        origin="lower",
+                        aspect="auto",
+                    )
+
+                func(datashader_scatter, hue=None)
             case "None":
                 pass
             case _:
                 raise NotImplementedError(
-                    f"upper = {upper} not implemented. Use either 'scatter', 'contour', 'hist' (bivariate histogram) or None plots for upper triangle."
+                    f"upper = {upper} not implemented. Use either 'scatter', 'contour', 'hist' (bivariate histogram), 'datashader', or None plots for upper triangle."
                 )
 
     _plot_triangle("upper", upper)

@@ -548,8 +548,10 @@ class BasePrimBox(abc.ABC):
         i: int | None = None,
         dims: list[str] | None = None,
         diag: Literal["kde", "cdf", "regression"] | None = "kde",
-        upper: Literal["scatter", "hexbin", "hist", "contour"] | None = "scatter",
-        lower: Literal["scatter", "hexbin", "hist", "contour"] | None = "contour",
+        upper: Literal["scatter", "hexbin", "hist", "contour", "datashader"]
+        | None = "scatter",
+        lower: Literal["scatter", "hexbin", "hist", "contour", "datashader"]
+        | None = "contour",
         fill_subplots: bool = True,
         legend=True,
     ) -> sns.PairGrid:
@@ -567,7 +569,7 @@ class BasePrimBox(abc.ABC):
                Plot diagonal as kernel density estimate ('kde'),
                cumulative density function ('cdf'), or regression ('regression')
         upper, lower: string, optional
-               Use either 'scatter', 'contour', or 'hist' (bivariate
+               Use either 'scatter', 'contour', 'datashader', or 'hist' (bivariate
                histogram) plots for upper and lower triangles. Upper triangle
                can also be 'none' to eliminate redundancy. Legend uses
                lower triangle style for markers.
@@ -1079,8 +1081,10 @@ class RegressionPrimBox(BasePrimBox):
         i: int | None = None,
         dims: list[str] | None = None,
         diag: Literal["kde", "cdf", "regression"] | None = "regression",
-        upper: Literal["scatter", "hexbin", "hist", "contour"] | None = "hexbin",
-        lower: Literal["scatter", "hexbin", "hist", "contour"] | None = "scatter",
+        upper: Literal["scatter", "hexbin", "hist", "contour", "datashader"]
+        | None = "hexbin",
+        lower: Literal["scatter", "hexbin", "hist", "contour", "datashader"]
+        | None = "scatter",
         fill_subplots: bool = True,
         legend=False,
     ) -> sns.PairGrid:
